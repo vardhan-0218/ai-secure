@@ -23,6 +23,8 @@ const logger = require('../utils/logger');
 const { analyzeChunk } = require('../services/aiService');
 const { aiStreamQueue } = require('../services/queueManager');
 const sessionManager = require('../services/sessionMemory');
+const pool = require('../db/pool');
+const { createAlert } = require('../controllers/alertsController');
 
 const CHUNK_SIZE = 20; // Lines per AI chunk
 const MAX_CONCURRENT_CHUNKS = 3; // Max parallel AI calls per stream session
@@ -147,7 +149,7 @@ async function streamAndAnalyze(content, ws, userId, incomingSessionId) {
   if (existing && existing.userId === userId) {
     sessionId = incomingSessionId;
   } else {
-    sessionId = sessionManager.createSession(userId, 'stream');
+    sessionId = sessionManager.createSession(userId, 'log');
   }
   const session = sessionManager.getSession(sessionId);
   
@@ -173,7 +175,7 @@ async function streamAndAnalyze(content, ws, userId, incomingSessionId) {
   const allFindings = [];
 
   for (let i = 0; i < chunks.length; i++) {
-    if (ws.readyState !== WebSocket.OPEN || ws._cancelStream) break;
+    if (ws._cancelStream) break;
 
     const ci = i;
     const chunkContent = chunks[ci];
@@ -192,7 +194,7 @@ async function streamAndAnalyze(content, ws, userId, incomingSessionId) {
       // We process sequentially at the loop level but the queue handles concurrency system-wide
       const result = await aiStreamQueue.enqueue(() => analyzeChunk(chunkContent, ci, sessionId), { priority: 1, retries: 2 });
       
-      if (ws.readyState !== WebSocket.OPEN || ws._cancelStream) break;
+      if (ws._cancelStream) break;
       if (!result) continue;
 
       // Accumulate session context
@@ -277,12 +279,52 @@ async function streamAndAnalyze(content, ws, userId, incomingSessionId) {
 
   // Final summary
   const riskSummary = buildRiskSummary(allFindings, sessionContext);
+
+  const processingMs = Date.now() - new Date(session.createdAt).getTime();
+  const finalRiskLevel = sessionContext.current_risk_level || 'clean';
+  let finalRiskScore = allFindings.reduce((sum, f) => sum + (f.score || 0), 0);
+  if (finalRiskLevel === 'critical' && finalRiskScore < 8) finalRiskScore = 8.5;
+  if (finalRiskLevel === 'high' && finalRiskScore < 6) finalRiskScore = 6.5;
+
+  const dbSessionId = require('uuid').v4();
+
+  // Persist to DB
+  try {
+    await pool.query(
+      `INSERT INTO analysis_sessions
+        (id,user_id,input_type,content_length,risk_score,risk_level,action,ai_summary,processing_ms)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [dbSessionId, userId, 'log', lines.length, finalRiskScore, finalRiskLevel, 'blocked', riskSummary, processingMs]
+    );
+
+    for (const f of allFindings.slice(0, 50)) {
+      await pool.query(
+        `INSERT INTO findings (id,session_id,finding_type,risk_level,risk_score,line_number,description,masked_value)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [require('uuid').v4(), dbSessionId, f.type, f.risk, f.score || 0, f.line || null, f.description, null]
+      );
+    }
+
+    if (finalRiskLevel === 'critical' || finalRiskLevel === 'high') {
+      await createAlert(userId, dbSessionId, 'risk_detected', finalRiskLevel,
+        `[LIVE STREAM] ${finalRiskLevel.toUpperCase()} risk — ${allFindings.length} finding(s) detected during real-time processing.`
+      );
+    }
+
+    await pool.query(
+      'INSERT INTO activity_log (user_id,action,metadata) VALUES ($1,$2,$3)',
+      [userId, 'stream_analyze', JSON.stringify({ finalRiskLevel, finalRiskScore, findingsCount: allFindings.length })]
+    );
+  } catch (dbErr) {
+    logger.error(`Stream DB persist failed: ${dbErr.message}`);
+  }
+
   send(ws, {
     type: 'stream_complete',
     totalLines: lines.length,
     totalChunks,
     totalFindings: allFindings.length,
-    finalRiskLevel: sessionContext.current_risk_level,
+    finalRiskLevel,
     summary: riskSummary,
     all_findings: allFindings.slice(0, 100),
     timestamp: new Date().toISOString(),

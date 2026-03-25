@@ -3,7 +3,7 @@ import {
   Scan, Upload, Type, Settings2, RotateCcw, ChevronDown, ChevronUp,
   BarChart3, Terminal, MessageSquare, Bell, Activity, TrendingUp, Brain,
   History, ShieldCheck, Users, Layers, Clock, FileText, AlertTriangle,
-  CheckCircle2, XCircle, Minus, RefreshCw, Database
+  CheckCircle2, XCircle, Minus, RefreshCw, Database, Trash2
 } from 'lucide-react'
 import Navbar from '../components/Navbar'
 import FileUpload from '../components/FileUpload'
@@ -83,6 +83,43 @@ function HistoryTab() {
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
 
+  const [selectedId, setSelectedId] = useState(null)
+  const [detail, setDetail]         = useState(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+
+  const viewSession = async (id) => {
+    setSelectedId(id)
+    setDetailLoading(true)
+    setDetail(null)
+    try {
+      const { data } = await api.get(`/analyze/${id}`)
+      
+      // Synthesize missing Fix Analytics that were intentionally dropped from historical DB storage
+      const synthFindings = (data.findings || []).map(f => ({
+        ...f,
+        type: f.finding_type,
+        risk: f.risk_level,
+        rootCause: f.description || `Analyzed threat pattern matching ${f.finding_type}`,
+        fixSuggestions: f.risk_level === 'critical' || f.risk_level === 'high'
+          ? [
+              `Investigate the source of ${f.finding_type} immediately using system tracing.`,
+              `Review contiguous security events surrounding line index ${f.line_number || 'unknown'}.`,
+              `Implement strict rule-based quarantine for the offending access vector.`
+            ]
+          : [
+              `Monitor the frequency metric of ${f.finding_type} for escalation.`,
+              `Validate if this log artifact is expected during load phases.`
+            ]
+      }))
+
+      setDetail({ ...data, findings: synthFindings })
+    } catch {
+      // ignore silently
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
@@ -144,7 +181,7 @@ function HistoryTab() {
             )}
 
             {!loading && sessions.map(s => (
-              <tr key={s.id} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
+              <tr key={s.id} onClick={() => viewSession(s.id)} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors cursor-pointer">
                 <td className="px-4 py-3 text-slate-300 whitespace-nowrap">
                   <div className="flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5 text-slate-600" />
@@ -180,7 +217,106 @@ function HistoryTab() {
       </div>
 
       {!loading && sessions.length > 0 && (
-        <p className="text-xs text-slate-600 mt-3 text-right">{sessions.length} session(s) shown</p>
+        <p className="text-xs text-slate-600 mt-3 text-right">{sessions.length} session(s) shown. Click any row to view full report.</p>
+      )}
+
+      {/* Detail Modal */}
+      {selectedId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in" onClick={() => setSelectedId(null)}>
+          <div className="bg-slate-900 border border-slate-700/60 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-3">
+                <History className="w-5 h-5 text-brand-400" />
+                <h3 className="text-lg font-bold text-white">Historical Analysis Report</h3>
+              </div>
+              <button onClick={() => setSelectedId(null)} className="text-slate-500 hover:text-slate-300">
+                <XCircle className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="p-6 overflow-auto bg-slate-950 flex-1">
+              {detailLoading && (
+                <div className="flex flex-col items-center justify-center py-20 text-slate-500">
+                  <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mb-4" />
+                  Loading session data...
+                </div>
+              )}
+              {detail && (
+                <div className="space-y-6 animate-slide-up">
+                  {/* Summary/Risk panel */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                     <div className="card p-4">
+                       <p className="text-xs text-slate-500 mb-1">Risk Level</p>
+                       <RiskBadge level={detail.session.risk_level} />
+                     </div>
+                     <div className="card p-4">
+                       <p className="text-xs text-slate-500 mb-1">Risk Score</p>
+                       <p className="text-xl font-bold text-white">{Number(detail.session.risk_score).toFixed(1)}<span className="text-sm font-normal text-slate-500">/10</span></p>
+                     </div>
+                     <div className="card p-4">
+                       <p className="text-xs text-slate-500 mb-1">Input Type</p>
+                       <p className="text-sm text-slate-300 capitalize">{detail.session.input_type}</p>
+                     </div>
+                     <div className="card p-4">
+                       <p className="text-xs text-slate-500 mb-1">Processing Time</p>
+                       <p className="text-sm text-slate-300">{detail.session.processing_ms ? (detail.session.processing_ms / 1000).toFixed(2) + 's' : '—'}</p>
+                     </div>
+                  </div>
+
+                  {detail.session.ai_summary && (
+                    <div className="card p-5">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Brain className="w-4 h-4 text-brand-400" />
+                        <h4 className="font-semibold text-white">AI Summary</h4>
+                      </div>
+                      <p className="text-sm text-slate-300 leading-relaxed font-mono whitespace-pre-wrap bg-slate-900 p-4 rounded-xl border border-slate-800">{detail.session.ai_summary}</p>
+                    </div>
+                  )}
+
+                  {/* Findings */}
+                  <div className="card overflow-hidden">
+                    <div className="p-4 border-b border-slate-800 flex items-center gap-2 bg-slate-900/50">
+                       <AlertTriangle className="w-4 h-4 text-orange-400" />
+                       <h4 className="font-semibold text-white">Detected Findings & Explanations</h4>
+                       <span className="ml-auto text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full">{detail.findings.length} findings</span>
+                    </div>
+                    {detail.findings.length === 0 ? (
+                      <div className="p-8 text-center text-slate-500 text-sm">No specific threats or findings were detected in this session.</div>
+                    ) : (
+                      <div className="divide-y divide-slate-800/50">
+                        {detail.findings.map(f => (
+                          <div key={f.id} className="p-4 flex items-start gap-4 hover:bg-slate-800/20 transition-colors">
+                            <div className="mt-0.5 shrink-0"><RiskBadge level={f.risk_level} /></div>
+                            
+                            {f.line_number && (
+                               <div className="shrink-0 flex items-center justify-center min-w-[3rem] px-2 py-1 bg-slate-950 border border-slate-700 rounded-md shadow-inner text-xs font-mono font-bold text-slate-300">
+                                 L{f.line_number}
+                               </div>
+                            )}
+
+                            <div className="flex-1 min-w-0">
+                               <div className="flex items-center gap-2 mb-1.5">
+                                 <span className="font-mono text-sm text-brand-300 font-semibold">{f.finding_type}</span>
+                               </div>
+                               <p className="text-sm text-slate-400 leading-relaxed max-w-3xl">{f.description}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* AI Remediation Suggestions */}
+                  {detail.findings.length > 0 && (
+                     <div className="mt-6">
+                       <FixSuggestions findings={detail.findings} />
+                     </div>
+                  )}
+
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -194,6 +330,17 @@ function AdminTab() {
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState('')
   const [view, setView]           = useState('overview') // overview | users | sessions
+
+  const handleDeleteUser = async (userId) => {
+    if (!window.confirm("CRITICAL WARNING: Are you sure you want to permanently purge this user? All associated data and historical sessions will be CASCADE deleted. This action cannot be revoked.")) return;
+    
+    try {
+      await api.delete(`/admin/users/${userId}`);
+      setUsers(prev => prev.filter(u => u.id !== userId));
+    } catch (err) {
+      alert(err.response?.data?.error || "Failed to properly delete user from standard constraints.");
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -332,15 +479,15 @@ function AdminTab() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-800">
-                    {['Email', 'Role', 'Status', 'Joined'].map(h => (
+                    {['Email', 'Role', 'Status', 'Joined', 'Actions'].map(h => (
                       <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {loading && Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={4} />)}
+                  {loading && Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={5} />)}
                   {!loading && users.length === 0 && (
-                    <tr><td colSpan={4} className="px-4 py-10 text-center text-slate-500 text-sm">No users found</td></tr>
+                    <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-500 text-sm">No users found</td></tr>
                   )}
                   {!loading && users.map(u => (
                     <tr key={u.id} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
@@ -362,6 +509,16 @@ function AdminTab() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-slate-500 text-xs">{new Date(u.created_at).toLocaleDateString()}</td>
+                      <td className="px-4 py-3">
+                        <button 
+                          onClick={() => handleDeleteUser(u.id)}
+                          className={`p-1.5 rounded-lg transition-colors ${u.role === 'admin' ? 'text-slate-700 cursor-not-allowed' : 'text-slate-500 hover:text-red-400 hover:bg-red-500/10'}`}
+                          title={u.role === 'admin' ? "Cannot purge lateral admin accounts" : "Purge User"}
+                          disabled={u.role === 'admin'}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -442,9 +599,9 @@ export default function DashboardPage() {
   }
 
   function pushToast(alert) {
-    const id = Date.now()
+    const id = Date.now() + Math.random();
     setToasts(prev => [...prev, { id, ...alert }])
-    const timeout = alert.severity === 'critical' ? 12000 : alert.severity === 'high' ? 8000 : 5000
+    const timeout = alert.severity === 'critical' ? 12000 : alert.severity === 'high' ? 8000 : 5000;
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), timeout)
   }
 
@@ -744,18 +901,21 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* ── LIVE STREAM ───────────────────────────────────────────── */}
-        {tab === 'stream' && (
-          <div>
-            <div className="flex items-center gap-3 mb-6">
-              <h1 className="text-2xl font-bold text-white">Live Log Stream</h1>
-              <span className="text-xs px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full">
-                AI Chunk Analysis
-              </span>
-            </div>
-            <LiveLogStream />
+        {/* ── LIVE STREAM (Always mounted to preserve active WebSockets) ── */}
+        <div className={tab === 'stream' ? 'block' : 'hidden'}>
+          <div className="flex items-center gap-3 mb-6">
+            <h1 className="text-2xl font-bold text-white">Live Log Stream</h1>
+            <span className="text-xs px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full">
+              AI Chunk Analysis
+            </span>
           </div>
-        )}
+          <LiveLogStream 
+            pushToast={pushToast} 
+            incrementAlert={() => setAlertCount(c => c + 1)} 
+            setResult={setResult}
+            fetchSessions={fetchSessions}
+          />
+        </div>
 
         {/* ── ALERTS ────────────────────────────────────────────────── */}
         {tab === 'alerts' && (

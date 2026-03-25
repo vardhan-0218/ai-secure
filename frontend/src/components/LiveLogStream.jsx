@@ -10,7 +10,7 @@ const RISK_COLORS = {
   clean:    '',
 }
 
-export default function LiveLogStream() {
+export default function LiveLogStream({ pushToast, incrementAlert, setResult, fetchSessions }) {
   const [lines, setLines]               = useState([])
   const [chunkResults, setChunkResults] = useState([])
   const [alerts, setAlerts]             = useState([])
@@ -28,6 +28,7 @@ export default function LiveLogStream() {
   const bottomRef = useRef(null)
   const pausedRef = useRef(false)
   const lineMapRef = useRef({}) // chunk_index → chunk data
+  const lineGutterRef = useRef(null)
 
   useEffect(() => () => wsRef.current?.close(), [])
 
@@ -100,6 +101,10 @@ export default function LiveLogStream() {
 
       case 'stream_alert':
         setAlerts(prev => [msg, ...prev.slice(0, 29)])
+        if (pushToast && incrementAlert) {
+          pushToast({ severity: msg.severity, message: `[STREAM] ${msg.severity.toUpperCase()}: ${msg.finding_type} detected` })
+          incrementAlert()
+        }
         break
 
       case 'stream_progress':
@@ -110,14 +115,66 @@ export default function LiveLogStream() {
         setStreaming(false)
         setProgress({ done: msg.totalChunks, total: msg.totalChunks, percent: 100 })
         setSessionSummary(msg)
+        if (setResult) {
+          const finalRisk = msg.finalRiskLevel || 'low';
+          const synthFindings = (msg.all_findings || []).map(f => ({
+            ...f,
+            rootCause: f.description || `Discovered during continuous stream analysis.`,
+            fixSuggestions: f.risk === 'critical' || f.risk === 'high'
+              ? [
+                  `Investigate the source of ${f.type} immediately using network tracing.`,
+                  `Review associated application logs surrounding line index ${f.line || 'unknown'}.`,
+                  `Implement strict rate limiting and IP blocking for the offending access vector.`
+                ]
+              : [
+                  `Monitor the frequency of ${f.type} for escalation.`,
+                  `Validate if this behavior pattern is expected during normal load phases.`
+                ]
+          }));
+
+          const synthPredictions = finalRisk === 'critical' || finalRisk === 'high'
+            ? [{
+                threat: 'Lateral Movement & Privilege Escalation',
+                likelihood: 'high',
+                timeframe: 'Immediate',
+                explanation: 'Based on the sustained anomaly patterns in the stream, the threat actor may soon attempt to escalate privileges or bridge subnets.',
+                attack_vector: 'Multi-stage persistent threat sequence via compromised logging source.',
+                mitigations: ['Isolate the affected infrastructure segment', 'Rotate all exposed service credentials', 'Deploy deep-packet traffic inspection']
+              }]
+            : [];
+
+          const synthTrajectory = finalRisk === 'critical' ? 'Aggressive, escalating attack pattern detected across multiple sequential stream chunks.'
+            : finalRisk === 'high' ? 'High-frequency suspicious activity detected requiring immediate security triage.'
+            : 'Normal, operational background noise detected in the stream log.';
+
+          setResult({
+            findings: synthFindings,
+            risk_level: finalRisk,
+            risk_score: msg.finalRiskScore || (finalRisk === 'critical' ? 8.5 : finalRisk === 'high' ? 6.5 : 2.0),
+            summary: msg.summary || 'Real-time stream analysis has concluded safely.',
+            predictions: synthPredictions,
+            threat_trajectory: synthTrajectory,
+            attack_stage: finalRisk === 'critical' ? 'EXFILTRATION_TARGETED' : finalRisk === 'high' ? 'ACTIVE_RECONNAISSANCE' : 'INITIAL_MONITORING',
+            blastRadius: finalRisk === 'critical' ? { affected_systems: ['Core Data Store', 'Auth Provider API'], potential_data_loss: 'High risk of PII exfiltration if unaddressed.', business_impact: 'Severe compliance and regulatory violation' } : null,
+            insights: [msg.summary || 'Stream processing completed successfully.']
+          })
+        }
+        if (fetchSessions) fetchSessions()
         break
     }
-  }, [])
+  }, [setResult, fetchSessions])
 
   const disconnect = () => {
     wsRef.current?.close()
     setLines([]); setChunkResults([]); setStats({ total: 0, suspicious: 0, critical: 0, high: 0 })
-    setProgress(null); setSessionSummary(null); setConnError('')
+    setProgress(null); setSessionSummary(null); setConnError(''); setAlerts([])
+  }
+
+  const clearScreen = () => {
+    setLogInput('')
+    setLines([]); setChunkResults([]); setStats({ total: 0, suspicious: 0, critical: 0, high: 0 })
+    setProgress(null); setSessionSummary(null); setAlerts([])
+    if (setResult) setResult(null)
   }
 
   const startStream = () => {
@@ -171,9 +228,22 @@ export default function LiveLogStream() {
           )}
         </div>
 
-        <textarea value={logInput} onChange={e => setLogInput(e.target.value)} rows={5}
-          placeholder="Paste log content here, or click 'Load Sample'…"
-          className="input-field font-mono text-xs w-full mb-4 resize-none" />
+        {/* Custom Code Editor with Line Numbers */}
+        <div className="relative flex w-full mb-4 bg-slate-900 border border-slate-700/60 rounded-xl overflow-hidden focus-within:border-brand-500/50 transition-colors h-48 shadow-inner">
+          <div 
+            ref={lineGutterRef}
+            className="w-12 shrink-0 bg-slate-950/50 border-r border-slate-800 text-right pr-2 py-3 text-xs font-mono text-slate-600 select-none overflow-hidden" 
+          >
+            {logInput.split('\n').map((_, i) => <div key={i} className="leading-[1.4rem] opacity-70">{i + 1}</div>)}
+          </div>
+          <textarea 
+            value={logInput} 
+            onChange={e => setLogInput(e.target.value)}
+            onScroll={e => { if (lineGutterRef.current) lineGutterRef.current.scrollTop = e.target.scrollTop }}
+            placeholder="Paste raw logs, JSON events, or system traces here..."
+            className="flex-1 bg-transparent p-3 text-xs font-mono text-slate-300 placeholder:text-slate-600 focus:outline-none resize-none leading-[1.4rem] whitespace-pre overflow-auto scrollbar-thin scrollbar-thumb-slate-700" 
+          />
+        </div>
 
         <div className="flex flex-wrap gap-2">
           {!connected
@@ -194,6 +264,9 @@ export default function LiveLogStream() {
           </button>
           <button onClick={() => setLogInput(SAMPLE_LOG)} className="btn-secondary">
             Load Sample
+          </button>
+          <button onClick={clearScreen} className="btn-secondary flex items-center gap-2 text-slate-400">
+             Clear Stream
           </button>
         </div>
 

@@ -121,10 +121,33 @@ const getAlerts = async (req, res) => {
   }
 };
 
+const removeUser = async (req, res) => {
+  try {
+    const targetId = req.params.id;
+    if (targetId === req.user.id) {
+      return sendError(res, 400, 'You cannot delete your own account.');
+    }
+
+    // Safety constraint: Prevent lateral admin deletion
+    const targetResult = await pool.query('SELECT role FROM users WHERE id = $1', [targetId]);
+    if (!targetResult.rows.length) return sendError(res, 404, 'User not found');
+    if (targetResult.rows[0].role === 'admin') {
+      return sendError(res, 403, 'You cannot delete another administrator account.');
+    }
+
+    // CASCADE deletes are handled by schema associations to analysis_sessions, alerts, etc.
+    await pool.query('DELETE FROM users WHERE id = $1', [targetId]);
+    return sendSuccess(res, { message: 'User successfully deleted.' }, 200);
+  } catch (err) {
+    return sendError(res, 500, 'Failed to delete user', { detail: err.message });
+  }
+};
+
 module.exports = {
   getUsers,
   getAnalysisSessions,
   getAnalytics,
   getAlerts,
+  removeUser,
 };
 
