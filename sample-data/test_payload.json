@@ -1,0 +1,22 @@
+{
+  "text_scan": {
+    "input_type": "text",
+    "content": "User credentials: email=admin@company.com, password=Sup3rSecr3t!\nAPI access: api_key=sk-proj-abc123def456ghi789jkl012mno345pqr678stu\nAWS config: access_key=AKIAIOSFODNN7EXAMPLE\nDatabase: postgresql://dbuser:MyP@ssw0rd@prod.db.com:5432/myapp",
+    "options": { "mask": true, "block_high_risk": false, "log_analysis": false }
+  },
+  "log_scan": {
+    "input_type": "log",
+    "content": "2024-01-15 10:00:01 ERROR Login failed for user: admin\n2024-01-15 10:00:02 ERROR Login failed for user: admin\n2024-01-15 10:00:03 ERROR Login failed for user: admin\n2024-01-15 10:00:04 WARN  password=admin123 loaded from config\n2024-01-15 10:00:05 ERROR HTTP 500 at /api/login\n2024-01-15 10:00:06 ERROR   at com.app.Auth.login(Auth.java:88)",
+    "options": { "mask": true, "block_high_risk": false, "log_analysis": true }
+  },
+  "sql_scan": {
+    "input_type": "sql",
+    "content": "-- User authentication query\nSELECT u.*, s.session_token FROM users u \nJOIN sessions s ON u.id = s.user_id\nWHERE u.email = 'admin@test.com' \nAND u.password = 'hardcoded_pass_123'\nAND s.token = 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc123';",
+    "options": { "mask": true, "block_high_risk": false, "log_analysis": false }
+  },
+  "safe_content": {
+    "input_type": "text",
+    "content": "This is a public announcement. Our product is launching on March 25, 2024. Visit our website at www.example.com for more details. Contact our support team to get started.",
+    "options": { "mask": true, "block_high_risk": false, "log_analysis": false }
+  }
+}

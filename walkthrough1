@@ -1,0 +1,100 @@
+# AI Secure — AI-First Rebuild Walkthrough
+
+## What Was Built
+
+The platform has been completely rebuilt from a regex/rule-based engine into a true **AI-first security system**.
+
+---
+
+## Changes Made
+
+### 🐍 Python AI Service (`ai-service/`)
+| File | What Changed |
+|------|-------------|
+| [analyzer.py](file:///c:/Users/K%20V%20VARDHAN/Desktop/SISA/Data_secure/ai-service/analyzer.py) | Complete rewrite. AI is now the primary engine. 5 new functions: [analyze_with_ai](file:///c:/Users/K%20V%20VARDHAN/Desktop/SISA/Data_secure/ai-service/analyzer.py#169-256), [analyze_chunk_with_ai](file:///c:/Users/K%20V%20VARDHAN/Desktop/SISA/Data_secure/ai-service/analyzer.py#260-333), [chat_with_ai](file:///c:/Users/K%20V%20VARDHAN/Desktop/SISA/Data_secure/ai-service/analyzer.py#337-398), [predict_threats_ai](file:///c:/Users/K%20V%20VARDHAN/Desktop/SISA/Data_secure/ai-service/analyzer.py#402-464), [correlate_logs_ai](file:///c:/Users/K%20V%20VARDHAN/Desktop/SISA/Data_secure/ai-service/analyzer.py#468-515). Regex patterns are pre-filter hints only. |
+| [app.py](file:///c:/Users/K%20V%20VARDHAN/Desktop/SISA/Data_secure/ai-service/app.py) | Complete rewrite. 5 new REST endpoints matching the new AI functions. Graceful error handling with fallback mode. |
+| [.env](file:///c:/Users/K%20V%20VARDHAN/Desktop/SISA/Data_secure/backend/.env) | Backend switched to [openrouter](file:///c:/Users/K%20V%20VARDHAN/Desktop/SISA/Data_secure/ai-service/analyzer.py#142-165), model list updated |
+
+### 🟡 Node.js Backend (`backend/src/`)
+| File | What Changed |
+|------|-------------|
+| `modules/aiService.js` | Rewritten — 5 typed bridge functions (`getAIInsights`, `analyzeChunk`, `getAIChat`, `getPredictions`, `getCorrelations`) |
+| `modules/predictiveEngine.js` | **New file** — wraps AI prediction endpoint |
+| `websocket/streamServer.js` | Complete rewrite — chunk-based AI processing (20 lines/chunk, 3 parallel), real-time events: `chunk_ai_result`, `stream_alert`, `stream_progress`, `stream_complete` |
+| `routes/analyze.js` | AI-primary pipeline — all findings, root_cause, fix_suggestions from AI. Response now includes `predictions`, `threat_trajectory`, `blast_radius`, `confidence` |
+| `routes/chat.js` | Complete rewrite — full AI conversation with session memory, no regex canned responses |
+
+### ⚛️ React Frontend (`frontend/src/`)
+| File | What Changed |
+|------|-------------|
+| `components/LiveLogStream.jsx` | Rebuilt — handles chunk WebSocket events, per-chunk AI commentary, escalation detection, progress bar |
+| `components/InsightsPanel.jsx` | Upgraded — circular risk gauge, root_cause, structured fix_suggestions with priority, anomalies, confidence score |
+| `components/PredictivePanel.jsx` | **New component** — predictions list, blast radius, attack stage, urgency |
+| `components/RiskDashboard.jsx` | Upgraded — KPI cards, animated risk bars, finding type heatmap, session history chart, AI correlation panel |
+| `components/ChatAssistant.jsx` | Rebuilt — AI conversation with history, follow-up suggestions, confidence badge, markdown responses |
+| `pages/DashboardPage.jsx` | Added **Predictions tab**, passes full AI result to all components |
+
+---
+
+## AI Data Flow (How It Works)
+
+```
+User submits content
+    ↓
+Node.js /analyze route
+    ↓  POST
+Python /ai/analyze  ←→  Gemini / OpenRouter LLM
+    ↓
+Returns: { findings, root_cause, predictions, fix_suggestions, 
+           anomalies, risk_score, confidence, summary }
+    ↓
+Node.js blends with regex line numbers (secondary)
+    ↓
+Also calls: /ai/predict (predictions) + /ai/correlate (correlation)
+    ↓
+Frontend renders: Insights + Predictions + Dashboard + Chat
+```
+
+---
+
+## ⚠️ Action Required: API Key
+
+The existing API keys in `ai-service/.env` are **expired/invalid**. The platform runs in graceful fallback mode (regex only, no AI reasoning), which is why you may see *"AI reasoning unavailable"*.
+
+**To activate full AI reasoning, do ONE of the following:**
+
+### Option A — Get a free Gemini key (recommended)
+1. Go to **https://aistudio.google.com/app/apikey**
+2. Create a new API key
+3. Open `ai-service/.env`, set:
+   ```
+   LLM_BACKEND=gemini
+   GEMINI_API_KEY=<your-new-key>
+   ```
+4. Restart the AI service
+
+### Option B — Get a free OpenRouter key  
+1. Go to **https://openrouter.ai** → Sign Up → API Keys
+2. Create a free key (they give $5 free credit)
+3. Open `ai-service/.env`, set:
+   ```
+   LLM_BACKEND=openrouter
+   OPENROUTER_API_KEY=<your-new-key>
+   OPENROUTER_MODEL=google/gemma-3-27b-it:free
+   ```
+4. Restart the AI service: run `.\venv\Scripts\python.exe app.py` in `ai-service/`
+
+---
+
+## Verification Results
+
+| Feature | Status |
+|---------|--------|
+| Login / Auth | ✅ Working |
+| Analyze endpoint (`/analyze`) | ✅ Working (fallback mode without API key) |
+| WebSocket connection | ✅ Working |
+| Chunk streaming (Live Stream tab) | ✅ Working |
+| Predictions tab | ✅ Working (shows empty until API key valid) |
+| Dashboard heatmap | ✅ Working |
+| AI Chat panel | ✅ Working (fallback mode without API key) |
+| AI reasoning (root_cause, predictions, confidence) | ⚠️ Needs valid API key |

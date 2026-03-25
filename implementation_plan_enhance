@@ -1,0 +1,148 @@
+# Enhancement Plan — AI Secure Data Intelligence Platform
+
+Upgrade the existing platform with 11 innovations: root cause analysis, fix suggestions, WebSockets, AI chat, visual charts, timeline, attack patterns, cross-log correlation, and smart alerts.
+
+---
+
+## New Backend Packages
+- `ws` — WebSocket server for real-time log streaming
+
+## New Frontend Packages
+- `recharts` — React charts for risk dashboard
+
+---
+
+## Proposed Changes
+
+### Backend New Modules
+
+#### [NEW] src/modules/rootCauseEngine.js
+Maps each finding type → `rootCause` (why it happened) + `fixSuggestions` (how to fix).
+- Static knowledge base covering all 15+ detection types
+- Returns structured `{ rootCause, fixSuggestions[] }` per finding
+
+#### [NEW] src/modules/attackPatternEngine.js
+Temporal + repetition pattern analysis:
+- Brute force: ≥3 login failures → details with IP, count, timespan
+- API abuse: repeated identical requests within window
+- Credential stuffing: multiple users failing same IP
+- Returns severity-scored attack patterns with descriptions
+
+#### [NEW] src/modules/correlationEngine.js
+Cross-log analysis across multiple findings:
+- Groups findings by IP address
+- Identifies same credential across multiple lines
+- Detects repeated attack signatures
+- Returns correlation clusters with confidence scores
+
+#### [NEW] src/websocket/streamServer.js
+- Attaches `ws` WebSocket server to Express HTTP server
+- Accepts client connections, authenticates via token query param
+- Emits real-time log events as JSON frames: `{ type, line, finding, timestamp }`
+- Broadcasts high-risk alerts to all connected clients
+- Supports chunked file streaming (large log simulation)
+
+#### [NEW] src/routes/chat.js
+`POST /chat` — AI security chatbot:
+- Accepts `{ message, sessionId?, context? }`
+- Sends to Python AI service `/ai/chat` endpoint
+- Falls back to rule-based answers for common questions:
+  - "what risks" → summarize last session findings
+  - "how to fix" → return fix suggestions
+  - "why dangerous" → return root causes
+- Persists conversation to `chat_messages` DB table
+
+#### [NEW] src/routes/alerts.js
+- `GET /alerts` — user's alerts (unread first)
+- `PATCH /alerts/:id/read` — mark read
+- `GET /alerts/stats` — count by severity
+
+#### [MODIFY] server.js
+Attach `ws.Server` to the HTTP server after `app.listen()`.
+
+#### [MODIFY] src/routes/analyze.js
+Enrich each finding with `rootCause` and `fixSuggestions` from rootCauseEngine.
+Run `attackPatternEngine` on combined findings. Persist alerts for high/critical findings.
+
+---
+
+### DB Schema Updates
+
+```sql
+CREATE TABLE alerts (
+  id, user_id, session_id, type, severity, message, is_read, created_at
+);
+CREATE TABLE chat_messages (
+  id, user_id, role, content, created_at
+);
+```
+
+---
+
+### Frontend New Components
+
+#### [NEW] components/RiskDashboard.jsx
+- Donut chart: findings by type (recharts `PieChart`)
+- Bar chart: risk score over last 10 sessions (recharts `BarChart`)
+- Risk score radial gauge
+- Attack pattern summary cards
+
+#### [NEW] components/ChatAssistant.jsx
+- Floating panel (bottom-right, expandable)
+- Message bubbles (user/assistant)
+- Persists messages in component state
+- Calls `POST /chat` with current analysis context
+- Suggested questions: "What risks?", "How to fix?", "Is this a brute force?"
+
+#### [NEW] components/LiveLogStream.jsx
+- Connects to WebSocket `ws://localhost:3001/stream?token=<jwt>`
+- Displays streaming log lines with animated entry
+- Red flash on critical findings
+- Pause/resume control
+- "Simulate stream" button that sends sample.log content line by line
+
+#### [NEW] components/Timeline.jsx
+- Chronological list of events from analysis session
+- Each event: timestamp icon + type + risk badge
+- Groups by minute, shows time gaps
+
+#### [NEW] components/AlertPanel.jsx
+- Toast-style notifications top-right
+- Auto-dismisses after 5s (low), 10s (medium), persists (high/critical)
+- Bell icon in Navbar with unread count badge
+
+#### [NEW] components/FixSuggestions.jsx
+- Per-finding expandable card
+- Shows: `rootCause`, numbered `fixSuggestions`, severity
+
+#### [MODIFY] DashboardPage.jsx
+Four-tab navigation:
+1. **Analyze** — existing input + results
+2. **Dashboard** — RiskDashboard charts + session history
+3. **Live Stream** — LiveLogStream WebSocket viewer
+4. **Chat** — ChatAssistant full-page
+
+#### [MODIFY] ResultsView.jsx
+Each finding row expands to show root cause + fix suggestions.
+
+---
+
+## Verification Plan
+
+### API Tests
+```powershell
+# Chat endpoint
+Invoke-RestMethod -Uri http://localhost:3001/chat -Method Post `
+  -Headers @{Authorization="Bearer $token"} `
+  -Body '{"message":"what risks are present?"}'
+
+# Alerts
+Invoke-RestMethod -Uri http://localhost:3001/alerts `
+  -Headers @{Authorization="Bearer $token"}
+```
+
+### Browser Tests
+- Navigate tabs: Analyze → Dashboard → Live Stream → Chat
+- Trigger analysis → verify root cause in findings
+- Open Live Stream → click Simulate → watch lines flow in
+- Open Chat → ask "how to fix?" → verify response
