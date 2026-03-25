@@ -1,272 +1,121 @@
-# AI Secure Data Intelligence Platform
+# AI Secure Data Intelligence Platform 🛡️
 
-> Enterprise-grade AI-powered security scanning, log analysis, and risk assessment.
+The AI Secure Data Intelligence Platform is an enterprise-grade security analysis tool designed to ingest, process, and analyze raw logs, SQL queries, and freeform text to identify sophisticated threat actors, vulnerabilities, and data leaks using real-time generative AI.
 
-## Architecture
-
-```
-Data_secure/
-├── backend/          Node.js + Express API Gateway  (port 3001)
-├── ai-service/       Python Flask AI Service        (port 5001)
-├── frontend/         React + Tailwind Dashboard     (port 5173)
-└── sample-data/      Test logs and payloads
-```
+This system is built entirely on a persistent, multi-microservice architecture featuring **Live WebSocket Log Streaming**, **Reactive Frontends**, and a dedicated **Python AI Pipeline**.
 
 ---
 
-## Quick Start (Local Dev)
+## 🏗️ Architecture Stack
 
-### Prerequisites
-- Node.js 18+
-- Python 3.10+
-- PostgreSQL 14+ (running locally)
-
----
-
-### Step 1 — PostgreSQL Setup
-
-```powershell
-# Connect as postgres superuser and create the database
-psql -U postgres -c "CREATE DATABASE ai_secure_db;"
-
-# Run the schema
-psql -U postgres -d ai_secure_db -f backend/src/db/schema.sql
-```
-
-Default seeded admin → `admin@aisecure.dev` / `Admin1234!`
+1. **Frontend**: React 18, Vite, Tailwind CSS, Lucide Icons (Running on port `5173`)
+2. **Backend**: Node.js, Express, WebSockets, PostgreSQL (Running on port `3001`)
+3. **AI Service**: Python, Flask, Google Gemini API (Running on port `5000`)
 
 ---
 
-### Step 2 — Backend (Node.js)
+## ⚙️ Global Prerequisites
 
-```powershell
+Before you begin, ensure your system has the following installed:
+- **Node.js**: v18.0.0+ 
+- **Python**: v3.10+
+- **PostgreSQL**: v14.0+
+- **Google Gemini API Key**: Acquired via Google AI Studio
+
+---
+
+## 🚀 Setup Instructions
+
+### 1. Database Setup (PostgreSQL)
+1. Ensure your local PostgreSQL service is running.
+2. Open your preferred SQL interface (pgAdmin, DBeaver, or psql cli) and create a database named `ai_secure`.
+3. Locate the schema file in the project directory: `backend/src/db/schema.sql`.
+4. Run the contents of `schema.sql` against the `ai_secure` database to build the tables. (This enables the `uuid-ossp` extension automatically).
+
+### 2. Backend API Service
+Navigate into the `backend/` directory from the root of the project.
+
+```bash
 cd backend
-
-# Copy env file and fill in your values
-copy .env.example .env
-
-# Install dependencies
 npm install
-
-# Start dev server (with auto-reload)
-npm run dev
 ```
 
-**Edit `backend/.env`** — minimum required:
+Create a `.env` file in the `backend/` directory:
 ```env
-DB_PASSWORD=your_postgres_password
-JWT_SECRET=any_long_random_string_here
-JWT_REFRESH_SECRET=another_long_random_string_here
+PORT=3001
+JWT_SECRET=YOUR_SUPER_SECRET_JWT_SIGNATURE_KEY
+DB_USER=postgres
+DB_PASSWORD=YOUR_POSTGRES_PASSWORD
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=ai_secure
+AI_SERVICE_URL=http://127.0.0.1:5000
 ```
 
-Backend will start at **http://localhost:3001**  
-Health check: http://localhost:3001/health
+Start the backend server:
+```bash
+node server.js
+```
+*(You should see "✅ PostgreSQL connected" and "🔌 AI WebSocket stream server initialized" in your terminal).*
 
----
+### 3. AI Intelligence Service
+Navigate into the `ai-service/` directory.
 
-### Step 3 — Python AI Service
-
-```powershell
+```bash
 cd ai-service
-
-# Copy env file
-copy .env.example .env
-
-# Create virtual environment
-python -m venv venv
-venv\Scripts\activate
-
-# Install dependencies
 pip install -r requirements.txt
+```
 
-# Start the service
+Create a `.env` file in the `ai-service/` directory:
+```env
+PORT=5000
+GEMINI_API_KEY=YOUR_GOOGLE_GEMINI_API_KEY
+```
+
+Start the Flask AI engine:
+```bash
 python app.py
 ```
+*(You should see "Running on http://127.0.0.1:5000" in your terminal).*
 
-**Edit `ai-service/.env`** for LLM integration:
-```env
-LLM_BACKEND=gemini          # or 'openrouter' or leave blank for rule-based
-GEMINI_API_KEY=AIza...      # from https://aistudio.google.com/app/apikey
-# OR
-OPENROUTER_API_KEY=sk-or-...  # from https://openrouter.ai
-OPENROUTER_MODEL=mistralai/mistral-7b-instruct:free
+### 4. Frontend React Dashboard
+Navigate into the `frontend/` directory.
+
+```bash
+cd frontend
+npm install
 ```
 
-AI service starts at **http://localhost:5001**  
-> **Optional:** The backend works without the AI service (falls back to rule-based insights automatically).
+Create a `.env` file in the `frontend/` directory (Optional depending on default proxying):
+```env
+VITE_API_URL=http://localhost:3001/api
+VITE_WS_URL=ws://localhost:3001
+```
 
----
-
-### Step 4 — Frontend (React)
-
-```powershell
-cd frontend
-
-npm install
-
+Start the React development server:
+```bash
 npm run dev
 ```
 
-Frontend starts at **http://localhost:5173**
+---
+
+## 🔐 System Administrator Initialization
+
+To unlock the Admin Hub and User Purging features, you must manually seed an Admin account into the database via the included CLI tool.
+
+Open a new terminal, navigate to the `backend/` directory, and run the seeder:
+
+```bash
+node tools/seedAdmin.js admin@example.com MySecurePassword123
+```
+
+You can now use these credentials to log into the frontend application.
 
 ---
 
-## Usage Guide
+## 📡 Core Features & Operation
 
-### Login
-Navigate to `http://localhost:5173`  
-Use seeded admin: `admin@aisecure.dev` / `Admin1234!`  
-Or register a new account.
-
-### Analyzing Content
-
-1. **Text/Log/SQL mode** — Paste content in the tabbed textarea
-2. **File Upload mode** — Drag & drop `.txt`, `.log`, `.pdf`, `.docx`, `.sql` (up to 20MB)
-3. Configure **Analysis Options** (mask, block, log analysis)
-4. Click **Run Security Analysis**
-
-### API Usage (direct)
-
-```powershell
-# 1. Login
-$resp = Invoke-RestMethod -Uri http://localhost:3001/auth/login `
-  -Method Post -ContentType "application/json" `
-  -Body '{"email":"admin@aisecure.dev","password":"Admin1234!"}'
-
-$token = $resp.accessToken
-
-# 2. Analyze text
-Invoke-RestMethod -Uri http://localhost:3001/analyze `
-  -Method Post -ContentType "application/json" `
-  -Headers @{Authorization="Bearer $token"} `
-  -Body '{"input_type":"text","content":"password=secret123 api_key=sk-abc123","options":{"mask":true}}'
-
-# 3. Test with sample log file
-$form = @{ file = Get-Item "sample-data/sample.log"; input_type = "log"; options = "{`"mask`":true,`"log_analysis`":true}" }
-Invoke-RestMethod -Uri http://localhost:3001/analyze -Method Post `
-  -Headers @{Authorization="Bearer $token"} -Form $form
-```
-
----
-
-## API Contract
-
-### POST /analyze
-**Headers:** `Authorization: Bearer <token>`
-
-```json
-{
-  "input_type": "log | text | file | sql | chat",
-  "content": "...",
-  "options": {
-    "mask": true,
-    "block_high_risk": false,
-    "log_analysis": true
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "summary": "AI-generated executive summary",
-  "risk_score": 9.2,
-  "risk_level": "critical",
-  "action": "masked",
-  "findings": [{ "type": "password", "risk": "critical", "line": 5 }],
-  "insights": ["Hardcoded credentials detected..."],
-  "processed_content": "password=[REDACTED]"
-}
-```
-
-### POST /auth/register
-```json
-{ "email": "user@example.com", "password": "Password1!", "role": "user" }
-```
-
-### POST /auth/login
-```json
-{ "email": "user@example.com", "password": "Password1!" }
-```
-
-### GET /analyze/history
-Returns last 20 analysis sessions for current user.
-
----
-
-## Detection Capabilities
-
-| Type | Risk | Pattern |
-|------|------|---------|
-| Password | Critical | `password=`, `passwd=` |
-| AWS Key | Critical | `AKIA...` |
-| Gemini Key | Critical | `AIza...` |
-| OpenAI Key | Critical | `sk-...` |
-| DB Connection | Critical | `postgresql://user:pass@...` |
-| JWT Token | High | `eyJ...` |
-| API Key | High | `api_key=...` |
-| Phone | Medium | `+1-555-...` |
-| Email | Low | `user@domain.com` |
-| Stack Trace | Medium | Java/Python traces |
-| Brute Force | Critical | ≥3 login failures |
-| SQL Injection | Critical | `UNION SELECT`, `OR 1=1` |
-
----
-
-## Risk Levels
-
-| Level | Score | Action |
-|-------|-------|--------|
-| 🟢 Low | 0–2 | Allowed |
-| 🟡 Medium | 3–5 | Allowed / Masked |
-| 🔴 High | 6–8 | Masked |
-| ⛔ Critical | 9–10 | Masked or Blocked |
-
----
-
-## Environment Variables Reference
-
-### backend/.env
-| Variable | Description |
-|----------|-------------|
-| `PORT` | API port (default: 3001) |
-| `DB_HOST` | PostgreSQL host |
-| `DB_NAME` | Database name |
-| `DB_USER` | DB username |
-| `DB_PASSWORD` | DB password |
-| `JWT_SECRET` | JWT signing secret |
-| `JWT_REFRESH_SECRET` | Refresh token secret |
-| `AI_SERVICE_URL` | Python AI service URL |
-
-### ai-service/.env
-| Variable | Description |
-|----------|-------------|
-| `LLM_BACKEND` | `gemini` / `openrouter` / blank |
-| `GEMINI_API_KEY` | Google Gemini API key |
-| `OPENROUTER_API_KEY` | OpenRouter API key |
-| `OPENROUTER_MODEL` | Model ID (default: mistral-7b-instruct:free) |
-
----
-
-## Troubleshooting
-
-**Backend can't connect to PostgreSQL**
-```
-DB_PASSWORD not set → edit backend/.env and restart
-```
-
-**AI service offline (rule-based used instead)**
-```
-This is normal — backend auto-falls back. Start ai-service/app.py to enable LLM.
-```
-
-**Frontend 401 errors**
-```
-JWT expired → log out and log in again
-```
-
-**Port already in use**
-```powershell
-netstat -ano | findstr :3001   # find PID
-taskkill /PID <pid> /F
-```
+- **Static Analysis**: Jump to the "Analyze" tab to paste static blocks of logs, code, or upload log files for an immediate total-scan.
+- **Micro-Chunk Sequence AI (Live Stream)**: Jump to the "Live Stream" tab and paste hundreds of lines of raw logs. The WebSocket engine will sequentially chunk your logs, stream them to the AI, and natively construct exact predictive timelines, attack stages, and lateral movement projections dynamically.
+- **Post-Mortem History Viewer**: Click your History tab to view massive, persistent historical retrospectives of previously scanned payloads, perfectly mapping AI Remediation Suggestions directly to literal line numbers extracted from old threats.
+- **Admin Hub**: As an Admin, you wield full power to oversee the analytics of your entire platform, including global user deletion, historical cascades, and security-event distributions.
