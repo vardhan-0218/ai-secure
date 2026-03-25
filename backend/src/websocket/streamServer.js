@@ -20,9 +20,9 @@
 const WebSocket = require('ws');
 const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
-const { analyzeChunk } = require('../modules/aiService');
-const { aiStreamQueue } = require('../modules/queueManager');
-const sessionManager = require('../modules/sessionMemory');
+const { analyzeChunk } = require('../services/aiService');
+const { aiStreamQueue } = require('../services/queueManager');
+const sessionManager = require('../services/sessionMemory');
 
 const CHUNK_SIZE = 20; // Lines per AI chunk
 const MAX_CONCURRENT_CHUNKS = 3; // Max parallel AI calls per stream session
@@ -39,18 +39,22 @@ function initWebSocketServer(httpServer) {
   wss.on('connection', (ws, req) => {
     const urlParams = new URL(req.url, 'http://localhost').searchParams;
     const token = urlParams.get('token');
-    let userId = 'anonymous';
+    let userId = null;
 
-    // Authenticate if token provided
-    if (token) {
-      try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        userId = decoded.id;
-      } catch {
-        send(ws, { type: 'error', message: 'Invalid authentication token', code: 4001 });
-        ws.close(4001, 'Invalid token');
-        return;
-      }
+    // Require auth for streaming to prevent cross-user data exposure.
+    if (!token) {
+      send(ws, { type: 'error', message: 'Authentication token required', code: 4001 });
+      ws.close(4001, 'Auth required');
+      return;
+    }
+
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      userId = decoded.id;
+    } catch {
+      send(ws, { type: 'error', message: 'Invalid authentication token', code: 4001 });
+      ws.close(4001, 'Invalid token');
+      return;
     }
 
     logger.info(`WS connected: user=${userId}`);
@@ -138,8 +142,14 @@ async function streamAndAnalyze(content, ws, userId, incomingSessionId) {
   const totalChunks = chunks.length;
 
   // Initialize unified session memory
-  const sessionId = incomingSessionId || sessionManager.createSession(userId, 'stream');
-  const session = sessionManager.getSession(sessionId) || sessionManager.createSession(userId, 'stream');
+  let sessionId = null;
+  const existing = incomingSessionId ? sessionManager.getSession(incomingSessionId) : null;
+  if (existing && existing.userId === userId) {
+    sessionId = incomingSessionId;
+  } else {
+    sessionId = sessionManager.createSession(userId, 'stream');
+  }
+  const session = sessionManager.getSession(sessionId);
   
   // Local context fallback (in case Python memory resets during restart)
   const sessionContext = {
@@ -211,6 +221,8 @@ async function streamAndAnalyze(content, ws, userId, incomingSessionId) {
         anomalies: result.anomalies || [],
         ai_commentary: result.ai_commentary || '',
         new_patterns: result.new_patterns || [],
+        // Never send raw secrets to the browser in real-time streams.
+        chunk_content_masked: maskSensitiveForStream(chunkContent),
         session_totals: {
            findings: sessionContext.total_findings_so_far,
            risk_level: sessionContext.current_risk_level,
@@ -315,6 +327,24 @@ function send(ws, data) {
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function maskSensitiveForStream(text) {
+  if (!text) return '';
+  let out = String(text);
+
+  // Common credential-like fields.
+  out = out.replace(/(password|passwd|pwd|secret|api[_-]?key|token)\s*[:=]\s*(\S+)/gi, (_m, k) => {
+    return `${k}: [REDACTED]`;
+  });
+
+  // AWS access key
+  out = out.replace(/\bAKIA[0-9A-Z]{16}\b/g, 'AKIA...: [REDACTED]');
+
+  // Generic JWT-ish tokens (best-effort; avoids heavy regex)
+  out = out.replace(/\beyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\b/g, 'JWT: [REDACTED]');
+
+  return out;
 }
 
 // ─── Broadcast Utilities ──────────────────────────────────────────────────────

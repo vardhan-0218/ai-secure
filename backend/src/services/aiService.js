@@ -54,24 +54,6 @@ async function getAIInsights(payload, sessionId = null) {
     return _minimalFallback(payload);
   }
 }
-async function getAIInsights(payload) {
-  try {
-    const response = await axios.post(`${AI_SERVICE_URL}/ai/analyze`, {
-      content: payload.content,
-      context: {
-        inputType: payload.inputType,
-        riskLevel: payload.riskLevel,
-        riskScore: payload.riskScore,
-        stats: payload.stats || {},
-        findingsCount: (payload.findings || []).length,
-      },
-    }, { timeout: AI_TIMEOUT });
-    return response.data;
-  } catch (err) {
-    logger.error(`AI getInsights failed: ${err.message}`);
-    return _minimalFallback(payload);
-  }
-}
 
 /**
  * Analyze a single log chunk during real-time streaming.

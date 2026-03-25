@@ -99,7 +99,9 @@ export default function ChatAssistant({ analysisContext }) {
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-white leading-none">AI Security Assistant</p>
               <p className="text-[10px] text-slate-500 mt-0.5">
-                {analysisContext ? `Context: ${analysisContext.risk_level || 'loaded'}` : 'No analysis loaded'}
+                {analysisContext
+                  ? `Context: ${analysisContext.risk_level || 'loaded'} • ${analysisContext.risk_score ?? '—'}/10 • ${analysisContext.findings?.length ?? 0} findings`
+                  : 'No analysis loaded'}
               </p>
             </div>
             <button onClick={clearChat} className="text-slate-600 hover:text-slate-400 transition-colors" title="Clear chat">

@@ -1,10 +1,11 @@
 const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
+const { sendError } = require('../utils/response');
 
 const authMiddleware = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Access denied. No token provided.' });
+    return sendError(res, 401, 'Access denied. No token provided.');
   }
 
   const token = authHeader.split(' ')[1];
@@ -15,15 +16,15 @@ const authMiddleware = (req, res, next) => {
   } catch (err) {
     logger.warn(`Invalid token attempt: ${err.message}`);
     if (err.name === 'TokenExpiredError') {
-      return res.status(401).json({ error: 'Token expired. Please log in again.' });
+      return sendError(res, 401, 'Token expired. Please log in again.');
     }
-    return res.status(403).json({ error: 'Invalid token.' });
+    return sendError(res, 403, 'Invalid token.');
   }
 };
 
 const adminMiddleware = (req, res, next) => {
   if (!req.user || req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required.' });
+    return sendError(res, 403, 'Admin access required.');
   }
   next();
 };

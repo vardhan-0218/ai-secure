@@ -301,6 +301,8 @@ export default function LiveLogStream() {
 function ChunkRow({ chunk, expanded, onToggle }) {
   const riskColor = RISK_COLORS[chunk.chunk_risk_level] || ''
   const hasFindings = (chunk.findings?.length || 0) > 0
+  const chunkText = chunk.chunk_content_masked || ''
+  const showMaskedContent = Boolean(chunkText.trim())
 
   return (
     <div className={`border-b border-slate-900 ${riskColor}`}>
@@ -348,6 +350,22 @@ function ChunkRow({ chunk, expanded, onToggle }) {
               <span className="text-slate-400">{f.description}</span>
             </div>
           ))}
+
+          {showMaskedContent && (
+            <div className="pt-2">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[10px] text-slate-500 font-semibold px-2 py-0.5 rounded-full border border-slate-700 bg-slate-800/30">
+                  Masked chunk
+                </span>
+                <span className="text-[10px] text-slate-600 px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700">
+                  Sensitive lines highlighted
+                </span>
+              </div>
+              <pre className="font-mono text-[11px] leading-relaxed text-slate-300 bg-slate-900/40 border border-slate-800 rounded-xl p-3 overflow-auto max-h-36 whitespace-pre-wrap">
+                {renderHighlightedLines(chunkText)}
+              </pre>
+            </div>
+          )}
           {chunk.anomalies?.map((a, i) => (
             <div key={i} className="text-xs text-yellow-400 bg-yellow-500/8 rounded px-2 py-1">⚠ {a}</div>
           ))}
@@ -355,6 +373,50 @@ function ChunkRow({ chunk, expanded, onToggle }) {
       )}
     </div>
   )
+}
+
+function renderHighlightedLines(text) {
+  if (!text) return null
+  const lines = String(text).split('\n')
+
+  return lines.map((line, idx) => {
+    const isSensitive = /\[REDACTED\]/.test(line)
+    return (
+      <span
+        key={idx}
+        className={isSensitive ? 'block bg-red-500/10 rounded px-1 py-0.5' : 'block'}
+      >
+        {highlightSensitiveLine(line)}
+        {idx < lines.length - 1 ? <br /> : null}
+      </span>
+    )
+  })
+}
+
+function highlightSensitiveLine(line) {
+  // Render spans only (no HTML injection).
+  const regex = /(password|passwd|pwd|secret|api[_-]?key|token)\s*[:=]\s*\[REDACTED\]/gi
+  const matches = Array.from(String(line).matchAll(regex))
+  if (!matches.length) return line
+
+  const parts = []
+  let last = 0
+
+  for (const m of matches) {
+    const start = m.index ?? 0
+    const end = start + m[0].length
+    if (start > last) parts.push(line.slice(last, start))
+
+    parts.push(
+      <span key={`${start}-${end}`} className="text-red-300 bg-red-500/15 border border-red-500/20 px-1 rounded">
+        {line.slice(start, end)}
+      </span>
+    )
+    last = end
+  }
+
+  if (last < line.length) parts.push(line.slice(last))
+  return parts
 }
 
 const SAMPLE_LOG = `2024-01-15 09:00:01 INFO  Application started on port 8080

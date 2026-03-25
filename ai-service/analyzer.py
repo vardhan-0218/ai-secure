@@ -51,7 +51,6 @@ EMPTY_RESULT = {
     "anomalies": [],
     "risk_score": 0,
     "confidence": 0.0,
-    "summary": "",
     "mode": "ai",
 }
 
@@ -258,7 +257,7 @@ def analyze_with_ai(content: str, context: Optional[dict] = None, session_id: Op
     """
     AI-first full document analysis.
     Returns the full structured schema:
-      {findings, root_cause, predictions, fix_suggestions, anomalies, risk_score, confidence, summary}
+      {findings, root_cause, predictions, fix_suggestions, anomalies, risk_score, confidence}
     """
     context = context or {}
     hints = _regex_prefilter(content)
@@ -330,8 +329,7 @@ Respond ONLY with this exact JSON structure (no markdown, no extra text):
     }}
   ],
   "risk_score": 0,
-  "confidence": 0.0,
-  "summary": "string - 2-3 sentence executive summary"
+  "confidence": 0.0
 }}"""
 
     try:
@@ -346,8 +344,7 @@ Respond ONLY with this exact JSON structure (no markdown, no extra text):
         fallback["findings"] = hints if isinstance(hints, list) else []
         fallback_len = len(hints) if isinstance(hints, list) else 0
         fallback["risk_score"] = min(fallback_len * 2, 9)
-        fallback["summary"] = f"AI reasoning unavailable ({type(e).__name__}). Showing regex-detected findings only."
-        fallback["root_cause"] = "AI service temporarily unavailable — configure a valid API key."
+        fallback["root_cause"] = f"AI service temporarily unavailable ({type(e).__name__}). Showing regex-detected findings only."
         fallback["confidence"] = 0.3
         return fallback
 
@@ -721,7 +718,7 @@ def run_analysis(content: str, findings: list, stats: dict, input_type: str) -> 
     try:
         result = analyze_with_ai(content, {"input_type": input_type, "stats": stats})
         return {
-            "summary": result.get("summary", ""),
+            "summary": result.get("root_cause", ""),
             "insights": [s.get("action", "") for s in result.get("fix_suggestions", [])],
             "anomalyScore": result.get("risk_score", 0),
             "patternHits": {},
@@ -748,7 +745,7 @@ def generate_insights_with_llm(content, findings, risk_level, risk_score, rule_r
             "prior_findings_count": len(findings),
         })
         return {
-            "summary": result.get("summary", rule_result.get("summary", "")),
+            "summary": result.get("root_cause", rule_result.get("summary", "")),
             "insights": [s.get("action", "") for s in result.get("fix_suggestions", [])],
             "anomalyScore": result.get("risk_score", 0),
             "patternHits": rule_result.get("patternHits", {}),

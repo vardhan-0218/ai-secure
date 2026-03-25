@@ -1,4 +1,6 @@
 import { BarChart3, Shield, AlertTriangle, TrendingUp, Activity, Clock, Database, Zap } from 'lucide-react'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
+import RiskSphere3D from './RiskSphere3D'
 
 const RISK_COLORS_HEX = {
   critical: '#ef4444',
@@ -29,9 +31,29 @@ export default function RiskDashboard({ findings = [], sessions = [], riskScore,
 
   // Session history chart data
   const last10Sessions = sessions.slice(0, 10).reverse()
+  const riskTrendData = last10Sessions.map(s => {
+    const dt = s.created_at ? new Date(s.created_at) : null
+    return {
+      label: dt ? dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—',
+      risk_score: Number(s.risk_score) || 0,
+    }
+  })
 
   return (
     <div className="space-y-5 animate-fade-in">
+      {/* 3D Risk Sphere */}
+      <div className="card p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-brand-400" />
+            <h3 className="font-semibold text-white text-sm">3D Risk Sphere</h3>
+          </div>
+          <span className="text-[10px] text-slate-500">
+            {riskLevel ? String(riskLevel).toUpperCase() : 'N/A'}
+          </span>
+        </div>
+        <RiskSphere3D riskLevel={riskLevel} riskScore={riskScore} />
+      </div>
 
       {/* KPI Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -105,6 +127,36 @@ export default function RiskDashboard({ findings = [], sessions = [], riskScore,
               })}
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Risk Trend Chart */}
+      <div className="card p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <BarChart3 className="w-4 h-4 text-brand-400" />
+          <h3 className="font-semibold text-white text-sm">Risk Trend (Last Sessions)</h3>
+        </div>
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={riskTrendData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+              <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 10 }} interval={0} />
+              <YAxis domain={[0, 10]} tick={{ fill: '#94a3b8', fontSize: 10 }} />
+              <Tooltip
+                contentStyle={{ background: 'rgba(15,23,42,0.95)', border: '1px solid #243447', borderRadius: 12 }}
+                labelStyle={{ color: '#e2e8f0' }}
+                formatter={(v) => `${Number(v).toFixed(0)}`}
+              />
+              <Line
+                type="monotone"
+                dataKey="risk_score"
+                stroke="#4f46e5"
+                strokeWidth={2.2}
+                dot={{ r: 3, fill: '#6366f1', stroke: 'transparent' }}
+                activeDot={{ r: 5 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       </div>
 

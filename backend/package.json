@@ -4,7 +4,7 @@
   "description": "AI Secure Data Intelligence Platform - API Gateway",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node cluster.js",
     "dev": "nodemon server.js",
     "db:init": "psql -U postgres -d ai_secure_db -f src/db/schema.sql"
   },

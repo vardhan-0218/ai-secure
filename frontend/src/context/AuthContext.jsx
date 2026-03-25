@@ -21,6 +21,13 @@ export function AuthProvider({ children }) {
     setLoading(false)
   }, [])
 
+  // Listen for 401 events from the api interceptor
+  useEffect(() => {
+    const handle = () => { setUser(null); setToken(null); delete api.defaults.headers.common['Authorization'] }
+    window.addEventListener('auth:logout', handle)
+    return () => window.removeEventListener('auth:logout', handle)
+  }, [])
+
   const login = useCallback(async (email, password) => {
     const { data } = await api.post('/auth/login', { email, password })
     setUser(data.user)

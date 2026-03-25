@@ -1,0 +1,79 @@
+const { v4: uuidv4 } = require('uuid');
+const { getAIChat } = require('../services/aiService');
+const pool = require('../db/pool');
+const logger = require('../utils/logger');
+const { sendSuccess, sendError } = require('../utils/response');
+
+const handleChat = async (req, res) => {
+  const { message, context, session_id } = req.body;
+  if (!message?.trim()) return sendError(res, 400, 'Message is required');
+
+  const userId = req.user.id;
+
+  try {
+    // AI-driven chat — session_id ties it directly to Python's memory engine
+    const aiResult = await getAIChat(message, session_id, context || {});
+
+    const reply = aiResult.reply || 'I could not generate a response. Please try again.';
+    const confidence = aiResult.confidence || 0;
+    const followUps = aiResult.follow_up_suggestions || [];
+
+    // Persist to DB
+    try {
+      await pool.query(
+        'INSERT INTO chat_messages (id, user_id, role, content) VALUES ($1,$2,$3,$4)',
+        [uuidv4(), userId, 'user', message]
+      );
+      await pool.query(
+        'INSERT INTO chat_messages (id, user_id, role, content) VALUES ($1,$2,$3,$4)',
+        [uuidv4(), userId, 'assistant', reply]
+      );
+    } catch (dbErr) {
+      logger.warn(`Chat DB persist failed: ${dbErr.message}`);
+    }
+
+    return sendSuccess(res, {
+      reply,
+      confidence,
+      follow_up_suggestions: followUps,
+      mode: aiResult.mode || 'ai',
+      timestamp: new Date().toISOString(),
+    });
+
+  } catch (err) {
+    logger.error(`Chat error: ${err.message}`);
+    return sendError(res, 500, 'AI chat service unavailable. Check AI service configuration.');
+  }
+};
+
+const getChatHistory = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT role, content, created_at FROM chat_messages
+       WHERE user_id=$1 ORDER BY created_at ASC LIMIT 100`,
+      [req.user.id]
+    );
+    return sendSuccess(res, { messages: result.rows });
+  } catch {
+    return sendError(res, 500, 'Failed to fetch chat history');
+  }
+};
+
+const clearChatHistory = async (req, res) => {
+  const { session_id } = req.body;
+  if (session_id) {
+    try {
+      const axios = require('axios');
+      await axios.delete(`${process.env.AI_SERVICE_URL || 'http://localhost:5001'}/ai/memory/${session_id}`);
+    } catch (err) {
+      logger.warn(`Failed to clear distributed AI memory cache: ${err.message}`);
+    }
+  }
+  return sendSuccess(res, { cleared: true });
+};
+
+module.exports = {
+  handleChat,
+  getChatHistory,
+  clearChatHistory
+};

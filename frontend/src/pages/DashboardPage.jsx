@@ -1,7 +1,9 @@
 import { useState, useCallback, useEffect } from 'react'
 import {
   Scan, Upload, Type, Settings2, RotateCcw, ChevronDown, ChevronUp,
-  BarChart3, Terminal, MessageSquare, Bell, Activity, TrendingUp, Brain
+  BarChart3, Terminal, MessageSquare, Bell, Activity, TrendingUp, Brain,
+  History, ShieldCheck, Users, Layers, Clock, FileText, AlertTriangle,
+  CheckCircle2, XCircle, Minus, RefreshCw, Database
 } from 'lucide-react'
 import Navbar from '../components/Navbar'
 import FileUpload from '../components/FileUpload'
@@ -16,23 +18,400 @@ import LiveLogStream from '../components/LiveLogStream'
 import Timeline from '../components/Timeline'
 import AlertPanel, { AlertBell, AlertToasts } from '../components/AlertPanel'
 import PredictivePanel from '../components/PredictivePanel'
+import TimelineFlow3D from '../components/TimelineFlow3D'
 import { analyzeContent, analyzeFile } from '../services/api'
 import api from '../services/api'
+import { useAuth } from '../context/AuthContext'
 
-const TABS = [
+// ─── Risk badge helper ─────────────────────────────────────────────────────────
+function RiskBadge({ level }) {
+  const map = {
+    critical: 'bg-red-500/15 text-red-400 border-red-500/30',
+    high:     'bg-orange-500/15 text-orange-400 border-orange-500/30',
+    medium:   'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+    low:      'bg-blue-500/15 text-blue-400 border-blue-500/30',
+    clean:    'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+  }
+  const icon = {
+    critical: <XCircle className="w-3 h-3" />,
+    high:     <AlertTriangle className="w-3 h-3" />,
+    medium:   <Minus className="w-3 h-3" />,
+    low:      <CheckCircle2 className="w-3 h-3" />,
+    clean:    <CheckCircle2 className="w-3 h-3" />,
+  }
+  const cls = map[level] || map.clean
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-semibold uppercase ${cls}`}>
+      {icon[level] || null}
+      {level || 'clean'}
+    </span>
+  )
+}
+
+// ─── Tabs config ───────────────────────────────────────────────────────────────
+const BASE_TABS = [
   { id: 'analyze',     label: 'Analyze',      icon: Scan },
   { id: 'dashboard',   label: 'Dashboard',    icon: BarChart3 },
   { id: 'predictions', label: 'Predictions',  icon: TrendingUp },
   { id: 'stream',      label: 'Live Stream',  icon: Terminal },
   { id: 'alerts',      label: 'Alerts',       icon: Bell },
+  { id: 'history',     label: 'History',      icon: History },
 ]
+const ADMIN_TAB = { id: 'admin', label: 'Admin', icon: ShieldCheck }
 
 const INPUT_MODES = [
   { id: 'text', label: 'Text / Log / SQL', icon: Type },
   { id: 'file', label: 'File Upload',      icon: Upload },
 ]
 
+// ─── Skeleton row ──────────────────────────────────────────────────────────────
+function SkeletonRow({ cols = 5 }) {
+  return (
+    <tr className="border-b border-slate-800/50">
+      {Array.from({ length: cols }).map((_, i) => (
+        <td key={i} className="px-4 py-3">
+          <div className="h-4 bg-slate-800/70 rounded animate-pulse" style={{ width: `${60 + Math.random() * 40}%` }} />
+        </td>
+      ))}
+    </tr>
+  )
+}
+
+// ─── History Tab ──────────────────────────────────────────────────────────────
+function HistoryTab() {
+  const [sessions, setSessions] = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [error, setError]       = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('')
+    try {
+      const data = await api.get('/analyze/history?limit=50').then(r => r.data)
+      // After interceptor unwrap, data IS the inner payload: { sessions, count }
+      setSessions(data.sessions || [])
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to load history')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Analysis History</h1>
+          <p className="text-sm text-slate-500 mt-1">Your past security analyses</p>
+        </div>
+        <button onClick={load} disabled={loading}
+          className="btn-secondary flex items-center gap-2 px-3 py-2">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div className="card p-4 border-red-500/30 bg-red-500/5 text-red-400 text-sm mb-4">
+          ⚠️ {error}
+        </div>
+      )}
+
+      <div className="card overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-800">
+              {['Date', 'Type', 'Risk Level', 'Risk Score', 'Action', 'File / Size', 'Duration'].map(h => (
+                <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {loading && Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={7} />)}
+
+            {!loading && sessions.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-4 py-16 text-center">
+                  <div className="flex flex-col items-center gap-3">
+                    <History className="w-10 h-10 text-slate-700" />
+                    <p className="text-slate-500 text-sm">No analyses yet — run your first analysis in the Analyze tab.</p>
+                  </div>
+                </td>
+              </tr>
+            )}
+
+            {!loading && sessions.map(s => (
+              <tr key={s.id} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
+                <td className="px-4 py-3 text-slate-300 whitespace-nowrap">
+                  <div className="flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-slate-600" />
+                    {new Date(s.created_at).toLocaleString()}
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-xs text-slate-300 capitalize">
+                    {s.input_type === 'file'
+                      ? <><FileText className="w-3 h-3" /> file</>
+                      : <><Layers className="w-3 h-3" /> text</>}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  <RiskBadge level={s.risk_level} />
+                </td>
+                <td className="px-4 py-3 text-slate-200 font-semibold tabular-nums">
+                  {s.risk_score != null ? Number(s.risk_score).toFixed(1) : '—'}<span className="text-slate-600 font-normal">/10</span>
+                </td>
+                <td className="px-4 py-3 text-slate-400 capitalize text-xs">{s.action || '—'}</td>
+                <td className="px-4 py-3 text-slate-500 text-xs">
+                  {s.uploaded_filename
+                    ? <span className="text-slate-300">{s.uploaded_filename} <span className="text-slate-600">({s.uploaded_size ? (s.uploaded_size / 1024).toFixed(1) + ' KB' : ''})</span></span>
+                    : <span className="text-slate-600">—</span>}
+                </td>
+                <td className="px-4 py-3 text-slate-500 text-xs">
+                  {s.processing_ms ? `${(s.processing_ms / 1000).toFixed(2)}s` : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {!loading && sessions.length > 0 && (
+        <p className="text-xs text-slate-600 mt-3 text-right">{sessions.length} session(s) shown</p>
+      )}
+    </div>
+  )
+}
+
+// ─── Admin Tab ─────────────────────────────────────────────────────────────────
+function AdminTab() {
+  const [analytics, setAnalytics] = useState(null)
+  const [users, setUsers]         = useState([])
+  const [allSessions, setAllSessions] = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState('')
+  const [view, setView]           = useState('overview') // overview | users | sessions
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('')
+    try {
+      const [analyticsRes, usersRes, sessionsRes] = await Promise.all([
+        api.get('/admin/analytics').then(r => r.data),
+        api.get('/admin/users?limit=100').then(r => r.data),
+        api.get('/admin/analysis-sessions?limit=50').then(r => r.data),
+      ])
+      setAnalytics(analyticsRes)
+      setUsers(usersRes.users || [])
+      setAllSessions(sessionsRes.sessions || [])
+    } catch (err) {
+      const msg = err.response?.status === 403
+        ? 'Access denied — admin only.'
+        : err.response?.data?.error || 'Failed to load admin data'
+      setError(msg)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const statCards = analytics ? [
+    { label: 'Total Users',    value: analytics.users,                   icon: <Users className="w-5 h-5 text-brand-400" /> },
+    { label: 'Total Analyses', value: analytics.sessions,               icon: <Database className="w-5 h-5 text-emerald-400" /> },
+    { label: 'Avg Risk Score', value: analytics.avgRiskScore?.toFixed(2), icon: <Activity className="w-5 h-5 text-orange-400" /> },
+    { label: 'Risk Levels',    value: analytics.riskDistribution?.length + ' categories', icon: <BarChart3 className="w-5 h-5 text-purple-400" /> },
+  ] : []
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+            <ShieldCheck className="w-6 h-6 text-brand-400" />
+            Admin Panel
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">System-wide visibility and controls</p>
+        </div>
+        <button onClick={load} disabled={loading} className="btn-secondary flex items-center gap-2 px-3 py-2">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div className="card p-5 border-red-500/30 bg-red-500/5 text-red-400 text-sm mb-6">
+          ⚠️ {error}
+        </div>
+      )}
+
+      {/* Sub-nav */}
+      {!error && (
+        <>
+          <div className="flex gap-2 mb-6">
+            {[
+              { id: 'overview',  label: 'Overview',  icon: BarChart3 },
+              { id: 'users',     label: 'Users',     icon: Users },
+              { id: 'sessions',  label: 'All Sessions', icon: History },
+            ].map(({ id, label, icon: Icon }) => (
+              <button key={id} onClick={() => setView(id)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all border
+                  ${view === id
+                    ? 'bg-brand-600/20 text-brand-400 border-brand-500/30'
+                    : 'text-slate-400 border-slate-700/50 hover:text-slate-200 hover:bg-slate-800/50'}`}>
+                <Icon className="w-4 h-4" />
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Overview */}
+          {view === 'overview' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {loading
+                  ? Array.from({ length: 4 }).map((_, i) => (
+                      <div key={i} className="card p-5">
+                        <div className="h-5 w-24 bg-slate-800 rounded animate-pulse mb-2" />
+                        <div className="h-8 w-16 bg-slate-800 rounded animate-pulse" />
+                      </div>
+                    ))
+                  : statCards.map(s => (
+                      <div key={s.label} className="card p-5 flex items-start gap-4">
+                        <div className="w-10 h-10 rounded-xl bg-slate-800/60 border border-slate-700 flex items-center justify-center">
+                          {s.icon}
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-500">{s.label}</p>
+                          <p className="text-2xl font-bold text-white mt-0.5">{s.value ?? '—'}</p>
+                        </div>
+                      </div>
+                    ))
+                }
+              </div>
+
+              {!loading && analytics?.riskDistribution && (
+                <div className="card p-5">
+                  <h3 className="text-sm font-semibold text-slate-300 mb-4">Risk Distribution</h3>
+                  <div className="space-y-3">
+                    {analytics.riskDistribution.map(r => {
+                      const total = analytics.sessions || 1
+                      const pct   = Math.round((r.count / total) * 100)
+                      return (
+                        <div key={r.risk_level} className="flex items-center gap-3">
+                          <RiskBadge level={r.risk_level} />
+                          <div className="flex-1 bg-slate-800 rounded-full h-2">
+                            <div
+                              className="h-2 rounded-full transition-all"
+                              style={{
+                                width: `${pct}%`,
+                                backgroundColor:
+                                  r.risk_level === 'critical' ? '#ef4444'
+                                  : r.risk_level === 'high'     ? '#f97316'
+                                  : r.risk_level === 'medium'   ? '#eab308'
+                                  : r.risk_level === 'low'      ? '#3b82f6'
+                                  : '#10b981',
+                              }}
+                            />
+                          </div>
+                          <span className="text-xs text-slate-400 tabular-nums w-10 text-right">{r.count}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Users */}
+          {view === 'users' && (
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-800">
+                    {['Email', 'Role', 'Status', 'Joined'].map(h => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading && Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={4} />)}
+                  {!loading && users.length === 0 && (
+                    <tr><td colSpan={4} className="px-4 py-10 text-center text-slate-500 text-sm">No users found</td></tr>
+                  )}
+                  {!loading && users.map(u => (
+                    <tr key={u.id} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
+                      <td className="px-4 py-3 text-slate-200">{u.email}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-semibold uppercase
+                          ${u.role === 'admin'
+                            ? 'bg-brand-500/15 text-brand-400 border-brand-500/30'
+                            : 'bg-slate-700/50 text-slate-400 border-slate-700'}`}>
+                          {u.role}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs
+                          ${u.is_active !== false
+                            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                            : 'bg-slate-700/50 text-slate-500 border-slate-700'}`}>
+                          {u.is_active !== false ? '● Active' : '○ Inactive'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-500 text-xs">{new Date(u.created_at).toLocaleDateString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* All Sessions */}
+          {view === 'sessions' && (
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-800">
+                    {['Date', 'User ID', 'Type', 'Risk Level', 'Score', 'Duration'].map(h => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading && Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={6} />)}
+                  {!loading && allSessions.length === 0 && (
+                    <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-500 text-sm">No sessions found</td></tr>
+                  )}
+                  {!loading && allSessions.map(s => (
+                    <tr key={s.id} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
+                      <td className="px-4 py-3 text-slate-400 text-xs whitespace-nowrap">{new Date(s.created_at).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-slate-500 text-xs font-mono">{s.user_id?.slice(0, 8)}…</td>
+                      <td className="px-4 py-3 text-slate-300 capitalize text-xs">{s.input_type}</td>
+                      <td className="px-4 py-3"><RiskBadge level={s.risk_level} /></td>
+                      <td className="px-4 py-3 text-slate-200 font-semibold tabular-nums text-xs">
+                        {s.risk_score != null ? Number(s.risk_score).toFixed(1) : '—'}<span className="text-slate-600 font-normal">/10</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-500 text-xs">
+                        {s.processing_ms ? `${(s.processing_ms / 1000).toFixed(2)}s` : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ─── Main DashboardPage ────────────────────────────────────────────────────────
 export default function DashboardPage() {
+  const { user } = useAuth()
   const [tab, setTab]             = useState('analyze')
   const [inputMode, setInputMode] = useState('text')
   const [content, setContent]     = useState('')
@@ -47,11 +426,17 @@ export default function DashboardPage() {
   const [alertCount, setAlertCount] = useState(0)
   const [toasts, setToasts]         = useState([])
 
+  // Build tab list — append Admin tab only for admins
+  const TABS = user?.role === 'admin'
+    ? [...BASE_TABS, ADMIN_TAB]
+    : BASE_TABS
+
   useEffect(() => { fetchSessions() }, [])
 
   async function fetchSessions() {
     try {
-      const { data } = await api.get('/analyze/history?limit=10')
+      // data IS the inner payload after interceptor unwrap: { sessions, count }
+      const data = await api.get('/analyze/history?limit=10').then(r => r.data)
       setSessions(data.sessions || [])
     } catch {}
   }
@@ -75,7 +460,6 @@ export default function DashboardPage() {
       else data = await analyzeContent({ input_type: contentType, content, options })
       setResult(data)
       fetchSessions()
-      // Toast alerts
       if (data.risk_level === 'critical' || data.risk_level === 'high') {
         pushToast({ severity: data.risk_level, message: `${data.risk_level.toUpperCase()}: ${data.findings?.length} finding(s) — score ${data.risk_score}/10` })
       }
@@ -87,7 +471,6 @@ export default function DashboardPage() {
     } finally { setLoading(false) }
   }
 
-  // Chat context includes the full AI result fields
   const chatContext = result ? {
     findings: result.findings,
     risk_level: result.risk_level,
@@ -118,11 +501,12 @@ export default function DashboardPage() {
             <Navbar activeSession={loading} minimal />
           </div>
         </div>
+
         {/* Tabs */}
-        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 flex gap-1 pb-1">
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 flex gap-1 pb-1 overflow-x-auto">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setTab(id)}
-              className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-lg transition-all
+              className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-lg transition-all whitespace-nowrap
                 ${tab === id
                   ? 'bg-brand-600/20 text-brand-400 border-b-2 border-brand-500'
                   : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/40'}`}>
@@ -136,6 +520,16 @@ export default function DashboardPage() {
               {id === 'predictions' && result?.predictions?.length > 0 && (
                 <span className="w-4 h-4 bg-orange-500 text-white text-[10px] rounded-full flex items-center justify-center font-bold">
                   {Math.min(result.predictions.length, 9)}
+                </span>
+              )}
+              {id === 'history' && sessions.length > 0 && (
+                <span className="w-4 h-4 bg-slate-600 text-white text-[10px] rounded-full flex items-center justify-center font-bold">
+                  {Math.min(sessions.length, 9)}
+                </span>
+              )}
+              {id === 'admin' && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-500/20 text-brand-300 border border-brand-500/20 ml-1">
+                  Admin
                 </span>
               )}
             </button>
@@ -294,6 +688,7 @@ export default function DashboardPage() {
                     anomalies={result.anomalies}
                     confidence={result.confidence}
                   />
+                  <TimelineFlow3D events={result.timeline || []} />
                   <Timeline events={result.timeline || []} />
                 </>
               )}
@@ -303,15 +698,20 @@ export default function DashboardPage() {
 
         {/* ── DASHBOARD ────────────────────────────────────────────── */}
         {tab === 'dashboard' && (
-          <div>
-            <h1 className="text-2xl font-bold text-white mb-6">Risk Dashboard</h1>
-            <RiskDashboard
-              findings={result?.findings || []}
-              sessions={sessions}
-              riskScore={result?.risk_score}
-              riskLevel={result?.risk_level}
-              correlation={result?.correlation}
-            />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+            <div className="lg:col-span-2">
+              <h1 className="text-2xl font-bold text-white mb-6">Risk Dashboard</h1>
+              <RiskDashboard
+                findings={result?.findings || []}
+                sessions={sessions}
+                riskScore={result?.risk_score}
+                riskLevel={result?.risk_level}
+                correlation={result?.correlation}
+              />
+            </div>
+            <div className="lg:col-span-1 space-y-6">
+              <AlertPanel onCountChange={setAlertCount} />
+            </div>
           </div>
         )}
 
@@ -364,9 +764,22 @@ export default function DashboardPage() {
             <AlertPanel onCountChange={setAlertCount} />
           </div>
         )}
+
+        {/* ── HISTORY ───────────────────────────────────────────────── */}
+        {tab === 'history' && <HistoryTab />}
+
+        {/* ── ADMIN ─────────────────────────────────────────────────── */}
+        {tab === 'admin' && user?.role === 'admin' && <AdminTab />}
+        {tab === 'admin' && user?.role !== 'admin' && (
+          <div className="card p-10 text-center">
+            <ShieldCheck className="w-12 h-12 mx-auto text-slate-700 mb-4" />
+            <p className="text-slate-400 font-semibold">Access Denied</p>
+            <p className="text-slate-600 text-sm mt-1">Admin privileges required.</p>
+          </div>
+        )}
       </main>
 
-      {/* Floating AI chat — passes full AI context */}
+      {/* Floating AI chat */}
       <ChatAssistant analysisContext={chatContext} />
     </div>
   )

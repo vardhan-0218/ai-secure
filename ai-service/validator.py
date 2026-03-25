@@ -32,7 +32,6 @@ REQUIRED_SCHEMA = {
     "anomalies":       [],
     "risk_score":      0,
     "confidence":      0.0,
-    "summary":         "",
 }
 
 # Strict JSON reminder appended to prompt on retry
@@ -104,8 +103,7 @@ def validate_and_normalize(result: dict) -> dict:
             clean_fixes.append(f)
     result["fix_suggestions"] = clean_fixes
 
-    # Ensure summary and root_cause are strings
-    result["summary"]    = str(result.get("summary", ""))
+    # Ensure root_cause is a string
     result["root_cause"] = str(result.get("root_cause", ""))
 
     return result

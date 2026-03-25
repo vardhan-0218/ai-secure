@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Brain, Lightbulb, TrendingUp, AlertTriangle, CheckCircle, Zap, Clock } from 'lucide-react'
 
 const RISK_GLOW = {
@@ -17,9 +18,36 @@ const RISK_RING = {
 }
 
 export default function InsightsPanel({ summary, insights, riskLevel, riskScore, riskSummary, stats, rootCause, fixSuggestions, anomalies, confidence }) {
+  const targetScore = Number(riskScore) || 0
+  const [animatedScore, setAnimatedScore] = useState(targetScore)
+
+  useEffect(() => {
+    const from = Number(animatedScore) || 0
+    const to = targetScore
+    if (from === to) return
+
+    const start = performance.now()
+    const duration = 900
+
+    let raf = null
+    const tick = (now) => {
+      const t = Math.min(1, (now - start) / duration)
+      // Ease-out cubic
+      const eased = 1 - Math.pow(1 - t, 3)
+      const v = from + (to - from) * eased
+      setAnimatedScore(v)
+      if (t < 1) raf = requestAnimationFrame(tick)
+    }
+
+    raf = requestAnimationFrame(tick)
+    return () => {
+      if (raf) cancelAnimationFrame(raf)
+    }
+  }, [targetScore])
+
   const ring = RISK_RING[riskLevel] || 'border-slate-700'
   const glow = RISK_GLOW[riskLevel] || ''
-  const scoreColor = riskScore >= 8 ? 'text-red-400' : riskScore >= 6 ? 'text-orange-400' : riskScore >= 3 ? 'text-yellow-400' : 'text-emerald-400'
+  const scoreColor = targetScore >= 8 ? 'text-red-400' : targetScore >= 6 ? 'text-orange-400' : targetScore >= 3 ? 'text-yellow-400' : 'text-emerald-400'
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -43,12 +71,12 @@ export default function InsightsPanel({ summary, insights, riskLevel, riskScore,
             <svg viewBox="0 0 64 64" className="w-20 h-20 -rotate-90">
               <circle cx="32" cy="32" r="26" fill="none" stroke="currentColor" className="text-slate-800" strokeWidth="6" />
               <circle cx="32" cy="32" r="26" fill="none" strokeWidth="6"
-                stroke={riskScore >= 8 ? '#ef4444' : riskScore >= 6 ? '#f97316' : riskScore >= 3 ? '#eab308' : '#10b981'}
+                stroke={targetScore >= 8 ? '#ef4444' : targetScore >= 6 ? '#f97316' : targetScore >= 3 ? '#eab308' : '#10b981'}
                 strokeLinecap="round"
-                strokeDasharray={`${(riskScore / 10) * 163} 163`} />
+                strokeDasharray={`${(animatedScore / 10) * 163} 163`} />
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className={`text-2xl font-bold ${scoreColor}`}>{riskScore}</span>
+              <span className={`text-2xl font-bold ${scoreColor}`}>{Math.round(animatedScore)}</span>
               <span className="text-[9px] text-slate-500 font-medium">/10</span>
             </div>
           </div>

@@ -6,13 +6,41 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+// Request interceptor - always attach latest token from localStorage
+api.interceptors.request.use((config) => {
+  try {
+    const stored = localStorage.getItem('auth')
+    if (stored) {
+      const { accessToken } = JSON.parse(stored)
+      if (accessToken) {
+        config.headers['Authorization'] = `Bearer ${accessToken}`
+      }
+    }
+  } catch { /* ignore parse errors */ }
+  return config
+})
+
 // Response interceptor - handle 401s globally
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const body = response.data;
+    if (body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'success')) {
+      if (body.success) {
+        response.data = body.data;
+        return response;
+      }
+      // Standard error payload -> throw so callers hit their catch blocks
+      const err = new Error(body.error || 'Request failed');
+      err.response = response;
+      throw err;
+    }
+    return response;
+  },
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('auth')
-      window.location.href = '/login'
+      // Dispatch event so AuthContext can react without hard redirect
+      window.dispatchEvent(new Event('auth:logout'))
     }
     return Promise.reject(error)
   }
