@@ -1,6 +1,6 @@
 from google import genai
 
-client = genai.Client(api_key="AIzaSyBpQHBtYFcQR176Qyzm6iZQ2OrPOxkOdU8")
+client = genai.Client(api_key="")
 
 
 response = client.models.generate_content(

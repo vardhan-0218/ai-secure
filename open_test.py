@@ -1,7 +1,7 @@
 import requests
 import time
 
-API_KEY = "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"
+API_KEY = ""
 url = "https://openrouter.ai/api/v1/chat/completions"
 
 headers = {

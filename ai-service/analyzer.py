@@ -178,21 +178,42 @@ def _call_gemini(prompt: str, max_tokens: int = 2048) -> str:
         raise ValueError("GEMINI_API_KEY not set")
 
     model_name = os.getenv("GEMINI_MODEL", _GEMINI_MODELS[0])
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": max_tokens},
-    }
+    # Safety settings to prevent empty responses during log analysis
+    safety_settings = [
+        {"category": f"HARM_CATEGORY_{cat}", "threshold": "BLOCK_NONE"}
+        for cat in ["HARASSMENT", "HATE_SPEECH", "SEXUALLY_EXPLICIT", "DANGEROUS_CONTENT"]
+    ]
 
     # Try primary model first, then all fallbacks
     models_to_try = [model_name] + [m for m in _GEMINI_MODELS if m != model_name]
     last_err = None
     for model in models_to_try:
+        gen_config = {
+            "temperature": 0.2, 
+            "maxOutputTokens": max_tokens
+        }
+
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": gen_config,
+            "safetySettings": safety_settings,
+        }
+        
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         try:
             resp = requests.post(url, json=payload, timeout=45)
             if resp.status_code == 200:
                 logger.info(f"Gemini OK [{model}]")
-                return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+                data = resp.json()
+                
+                # Double check for candidates
+                if not data.get("candidates") or not data["candidates"][0].get("content"):
+                    reason = data.get("promptFeedback", {}).get("blockReason", "REASON_UNKNOWN")
+                    logger.warning(f"Gemini [{model}] blocked/empty: {reason}")
+                    last_err = f"Blocked/Empty: {reason}"
+                    continue
+                    
+                return data["candidates"][0]["content"]["parts"][0]["text"]
             last_err = f"HTTP {resp.status_code}"
             logger.warning(f"Gemini [{model}] → {resp.status_code}, trying next")
         except Exception as e:
@@ -383,20 +404,30 @@ Respond ONLY with this JSON (no markdown):
 }}"""
 
     try:
-        # We don't use the full strict validate_and_normalize here because chunk schema is different
-        # Instead, we do a raw call and manual chunk validation
-        raw = _call_llm(prompt, max_tokens=1500)
-        m = re.search(r"\{[\s\S]*\}", raw)
-        result = json.loads(m.group(0)) if m else json.loads(raw)
-        
-        result = validate_chunk_result(result, chunk_index)
-        result["mode"] = "ai"
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                # We don't use the full strict validate_and_normalize here because chunk schema is different
+                # Instead, we do a raw call and manual chunk validation
+                raw = _call_llm(prompt, max_tokens=1500)
+                m = re.search(r"\{[\s\S]*\}", raw)
+                result = json.loads(m.group(0)) if m else json.loads(raw)
+                
+                result = validate_chunk_result(result, chunk_index)
+                result["mode"] = "ai"
 
-        # Update memory!
-        if session_id:
-            update_session(session_id, result)
+                # Update memory!
+                if session_id:
+                    update_session(session_id, result)
 
-        return result
+                return result
+            except json.JSONDecodeError as decode_err:
+                if attempt < max_retries:
+                    logger.warning(f"Chunk {chunk_index} JSON decode failed, retrying... ({decode_err})")
+                    prompt += f"\n\nCRITICAL FIX REQUIRED: Your previous response was invalid JSON. Error: {decode_err}. Provide ONLY fully valid JSON matching the schema."
+                else:
+                    raise
+        raise RuntimeError("Unreachable")
     except Exception as e:
         logger.error(f"Chunk AI analysis failed (chunk {chunk_index}): {e}")
         str_e = str(e)
@@ -413,6 +444,7 @@ Respond ONLY with this JSON (no markdown):
             "mode": "error",
             "error": str(e),
         }
+    return {}
 
 
 # ─── AI Chat with Conversation Memory ─────────────────────────────────────────
@@ -483,17 +515,27 @@ Respond ONLY with this JSON (no markdown outside the json):
 }}"""
 
     try:
-        raw = _call_llm(prompt, max_tokens=1500)
-        # Robust extraction
-        m = re.search(r"\{[\s\S]*\}", raw)
-        result = json.loads(m.group(0)) if m else json.loads(raw)
-        result["mode"] = "ai"
-        
-        # Save assistant reply to memory
-        if session_id and "reply" in result:
-            add_chat_message(session_id, "assistant", result["reply"])
-            
-        return result
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                raw = _call_llm(prompt, max_tokens=1500)
+                # Robust extraction
+                m = re.search(r"\{[\s\S]*\}", raw)
+                result = json.loads(m.group(0)) if m else json.loads(raw)
+                result["mode"] = "ai"
+                
+                # Save assistant reply to memory
+                if session_id and "reply" in result:
+                    add_chat_message(session_id, "assistant", result["reply"])
+                    
+                return result
+            except json.JSONDecodeError as decode_err:
+                if attempt < max_retries:
+                    logger.warning(f"Chat JSON decode failed, retrying... ({decode_err})")
+                    prompt += f"\n\nCRITICAL FIX REQUIRED: Your previous response was invalid JSON. Error: {decode_err}. Provide ONLY fully valid JSON matching the schema."
+                else:
+                    raise
+        raise RuntimeError("Unreachable")
     except Exception as e:
         logger.error(f"AI chat failed: {e}")
         str_e = str(e)
@@ -505,6 +547,7 @@ Respond ONLY with this JSON (no markdown outside the json):
             "follow_up_suggestions": ["Can you check the log stream instead?"],
             "mode": "error"
         }
+    return {}
 
 
 # ─── Predictive Threat Analysis ───────────────────────────────────────────────
@@ -564,11 +607,21 @@ Respond ONLY with this JSON:
 }}"""
 
     try:
-        raw = _call_llm(prompt, max_tokens=1800)
-        m = re.search(r"\{[\s\S]*\}", raw)
-        result = json.loads(m.group(0)) if m else json.loads(raw)
-        result["mode"] = "ai"
-        return result
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                raw = _call_llm(prompt, max_tokens=1800)
+                m = re.search(r"\{[\s\S]*\}", raw)
+                result = json.loads(m.group(0)) if m else json.loads(raw)
+                result["mode"] = "ai"
+                return result
+            except json.JSONDecodeError as decode_err:
+                if attempt < max_retries:
+                    logger.warning(f"Predict JSON decode failed, retrying... ({decode_err})")
+                    prompt += f"\n\nCRITICAL FIX REQUIRED: Your previous response was invalid JSON. Error: {decode_err}. Provide ONLY fully valid JSON matching the schema."
+                else:
+                    raise
+        raise RuntimeError("Unreachable")
     except Exception as e:
         logger.error(f"Predictive threat AI failed: {e}")
         str_e = str(e)
@@ -582,6 +635,7 @@ Respond ONLY with this JSON:
             "confidence": 0.0,
             "mode": "error"
         }
+    return {}
 
 
 # ─── Cross-Log AI Correlation ─────────────────────────────────────────────────
@@ -628,11 +682,20 @@ Respond ONLY with this JSON:
 }}"""
 
     try:
-        raw = _call_llm(prompt, max_tokens=1800)
-        m = re.search(r"\{[\s\S]*\}", raw)
-        result = json.loads(m.group(0)) if m else json.loads(raw)
-        result["mode"] = "ai"
-        return result
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                raw = _call_llm(prompt, max_tokens=1800)
+                m = re.search(r"\{[\s\S]*\}", raw)
+                result = json.loads(m.group(0)) if m else json.loads(raw)
+                result["mode"] = "ai"
+                return result
+            except json.JSONDecodeError as decode_err:
+                if attempt < max_retries:
+                    logger.warning(f"Correlation JSON decode failed, retrying... ({decode_err})")
+                    prompt += f"\n\nCRITICAL FIX REQUIRED: Your previous response was invalid JSON. Error: {decode_err}. Provide ONLY fully valid JSON matching the schema."
+                else:
+                    raise
     except Exception as e:
         logger.error(f"AI correlation failed: {e}")
         str_e = str(e)
@@ -648,6 +711,7 @@ Respond ONLY with this JSON:
             "summary": "AI reasoning unavailable",
             "mode": "error"
         }
+    return {}
 
 
 # ─── Legacy Bridge (kept for backward compatibility from old analyze route) ────
