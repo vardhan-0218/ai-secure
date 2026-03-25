@@ -83,10 +83,11 @@ def _regex_prefilter(content: str) -> list:
     for pattern, label in _PREFILTER:
         matches = re.findall(pattern, content, re.IGNORECASE | re.MULTILINE)
         if matches:
+            first_match = str(matches[0])
             hits.append({
                 "hint": label,
                 "count": len(matches),
-                "sample": str(matches[0])[:100] if matches else ""
+                "sample": "".join(ch for i, ch in enumerate(first_match) if i < 100) if len(first_match) > 0 else ""
             })
     return hits
 
@@ -100,11 +101,13 @@ def _call_llm(prompt: str, max_tokens: int = 2048) -> str:
     If Gemini succeeds → use it. If Gemini fails for any reason (rate limit, error) → OpenRouter.
     """
     # ── Step 1: Try Gemini (primary) ──────────────────────────────────────────
+    gemini_error_msg = ""
     try:
         result = _call_gemini(prompt, max_tokens)
         return result
     except Exception as gemini_err:
-        logger.warning(f"Gemini failed → switching to OpenRouter fallback. ({gemini_err})")
+        gemini_error_msg = str(gemini_err)
+        logger.warning(f"Gemini failed → switching to OpenRouter fallback. ({gemini_error_msg})")
 
     # ── Step 2: OpenRouter fallback (google/gemma-3n-e4b-it:free confirmed working) ──
     try:
@@ -113,7 +116,7 @@ def _call_llm(prompt: str, max_tokens: int = 2048) -> str:
     except Exception as or_err:
         raise RuntimeError(
             f"All LLM backends failed.\n"
-            f"  Gemini: {gemini_err}\n"
+            f"  Gemini: {gemini_error_msg}\n"
             f"  OpenRouter: {or_err}\n"
             f"  Check GEMINI_API_KEY and OPENROUTER_API_KEY in ai-service/.env"
         )
@@ -156,7 +159,8 @@ def _parse_json_response(raw_text: str) -> dict:
             continue
 
     # All strategies failed
-    raise json.JSONDecodeError(f"No valid JSON found in LLM response (first 200 chars): {raw_text[:200]}", raw_text, 0)
+    error_prefix = "".join(ch for i, ch in enumerate(raw_text) if i < 200)
+    raise json.JSONDecodeError(f"No valid JSON found in LLM response (first 200 chars): {error_prefix}", raw_text, 0)
 
 
 # Gemini models — ordered best-to-fallback (all confirmed available on this key)
@@ -229,7 +233,7 @@ def _call_openrouter(prompt: str, max_tokens: int = 2048) -> str:
 
 # ─── Primary: Full Document AI Analysis ───────────────────────────────────────
 
-def analyze_with_ai(content: str, context: dict = None, session_id: str = None) -> dict:
+def analyze_with_ai(content: str, context: Optional[dict] = None, session_id: Optional[str] = None) -> dict:
     """
     AI-first full document analysis.
     Returns the full structured schema:
@@ -238,7 +242,7 @@ def analyze_with_ai(content: str, context: dict = None, session_id: str = None) 
     context = context or {}
     hints = _regex_prefilter(content)
     hints_text = json.dumps(hints, indent=2) if hints else "None detected by pre-filter"
-    excerpt = content[:3000]
+    excerpt = "".join(ch for i, ch in enumerate(content) if i < 3000)
 
     # Inject memory context if available
     memory_context = build_context_summary(session_id) if session_id else ""
@@ -319,7 +323,8 @@ Respond ONLY with this exact JSON structure (no markdown, no extra text):
         fallback = dict(EMPTY_RESULT)
         fallback["mode"] = "fallback"
         fallback["findings"] = hints if isinstance(hints, list) else []
-        fallback["risk_score"] = min(len(fallback["findings"]) * 2, 9)
+        fallback_len = len(hints) if isinstance(hints, list) else 0
+        fallback["risk_score"] = min(fallback_len * 2, 9)
         fallback["summary"] = f"AI reasoning unavailable ({type(e).__name__}). Showing regex-detected findings only."
         fallback["root_cause"] = "AI service temporarily unavailable — configure a valid API key."
         fallback["confidence"] = 0.3
@@ -329,7 +334,7 @@ Respond ONLY with this exact JSON structure (no markdown, no extra text):
 
 # ─── Chunk Analysis (for real-time streaming) ─────────────────────────────────
 
-def analyze_chunk_with_ai(chunk: str, chunk_index: int, session_id: str = None) -> dict:
+def analyze_chunk_with_ai(chunk: str, chunk_index: int, session_id: Optional[str] = None) -> dict:
     """
     AI analysis of a log chunk (subset of lines) with session memory.
     """
@@ -381,7 +386,8 @@ Respond ONLY with this JSON (no markdown):
         # We don't use the full strict validate_and_normalize here because chunk schema is different
         # Instead, we do a raw call and manual chunk validation
         raw = _call_llm(prompt, max_tokens=1500)
-        result = json.loads(re.search(r"\{[\s\S]*\}", raw).group(0)) if re.search(r"\{[\s\S]*\}", raw) else json.loads(raw)
+        m = re.search(r"\{[\s\S]*\}", raw)
+        result = json.loads(m.group(0)) if m else json.loads(raw)
         
         result = validate_chunk_result(result, chunk_index)
         result["mode"] = "ai"
@@ -393,6 +399,8 @@ Respond ONLY with this JSON (no markdown):
         return result
     except Exception as e:
         logger.error(f"Chunk AI analysis failed (chunk {chunk_index}): {e}")
+        str_e = str(e)
+        err_trunc = "".join(ch for i, ch in enumerate(str_e) if i < 100)
         return {
             "chunk_index": chunk_index,
             "findings": [],
@@ -400,7 +408,7 @@ Respond ONLY with this JSON (no markdown):
             "chunk_risk_score": 0,
             "escalation": {"detected": False, "explanation": "AI analysis unavailable"},
             "anomalies": [],
-            "ai_commentary": f"AI error: {str(e)[:100]}",
+            "ai_commentary": f"AI error: {err_trunc}",
             "new_patterns": [],
             "mode": "error",
             "error": str(e),
@@ -409,7 +417,7 @@ Respond ONLY with this JSON (no markdown):
 
 # ─── AI Chat with Conversation Memory ─────────────────────────────────────────
 
-def chat_with_ai(message: str, session_id: str = None, analysis_context: dict = None) -> dict:
+def chat_with_ai(message: str, session_id: Optional[str] = None, analysis_context: Optional[dict] = None) -> dict:
     """
     Context-aware AI security chat powered by session memory.
     """
@@ -424,7 +432,10 @@ def chat_with_ai(message: str, session_id: str = None, analysis_context: dict = 
 
     # Build conversation history text
     history_text = ""
-    for msg in history[:-1]:  # Exclude current message
+    for i, item in enumerate(history):
+        if i >= len(history) - 1:
+            continue
+        msg = dict(item)
         role = "User" if msg.get("role") == "user" else "Assistant"
         history_text += f"{role}: {msg.get('content', '')}\n"
 
@@ -468,13 +479,14 @@ Respond ONLY with this JSON (no markdown outside the json):
   "reply": "string - your full markdown-formatted response",
   "confidence": 0.0,
   "referenced_findings": ["string - finding types you referenced in your answer"],
-  "follow_up_suggestions": ["string - 2-3 follow-up questions the user might want to ask"]
+  "follow_up_suggestions": ["string - 2-3 follow_up questions the user might want to ask"]
 }}"""
 
     try:
         raw = _call_llm(prompt, max_tokens=1500)
         # Robust extraction
-        result = json.loads(re.search(r"\{[\s\S]*\}", raw).group(0)) if re.search(r"\{[\s\S]*\}", raw) else json.loads(raw)
+        m = re.search(r"\{[\s\S]*\}", raw)
+        result = json.loads(m.group(0)) if m else json.loads(raw)
         result["mode"] = "ai"
         
         # Save assistant reply to memory
@@ -484,8 +496,10 @@ Respond ONLY with this JSON (no markdown outside the json):
         return result
     except Exception as e:
         logger.error(f"AI chat failed: {e}")
+        str_e = str(e)
+        err_trunc = "".join(ch for i, ch in enumerate(str_e) if i < 50)
         return {
-            "reply": f"Sorry, AI chat is temporarily unavailable ({str(e)[:50]}). Please try again.",
+            "reply": f"Sorry, AI chat is temporarily unavailable ({err_trunc}). Please try again.",
             "confidence": 0.0,
             "referenced_findings": [],
             "follow_up_suggestions": ["Can you check the log stream instead?"],
@@ -495,7 +509,7 @@ Respond ONLY with this JSON (no markdown outside the json):
 
 # ─── Predictive Threat Analysis ───────────────────────────────────────────────
 
-def predict_threats_ai(findings: list, timeline: list = None, context: dict = None) -> dict:
+def predict_threats_ai(findings: list, timeline: Optional[list] = None, context: Optional[dict] = None) -> dict:
     """
     AI-driven predictive threat analysis.
     Given current findings, predict what attacks or risks are LIKELY TO HAPPEN NEXT.
@@ -503,10 +517,10 @@ def predict_threats_ai(findings: list, timeline: list = None, context: dict = No
     timeline = timeline or []
     context = context or {}
     findings_summary = json.dumps(
-        [{"type": f.get("type"), "risk": f.get("risk"), "description": f.get("description","")} for f in findings[:20]],
+        [{"type": f.get("type"), "risk": f.get("risk"), "description": f.get("description","")} for i, f in enumerate(findings) if i < 20],
         indent=2
     )
-    timeline_summary = json.dumps(timeline[-10:], indent=2) if timeline else "[]"
+    timeline_summary = json.dumps([x for i, x in enumerate(timeline) if i >= len(timeline) - 10], indent=2) if timeline else "[]"
 
     prompt = f"""You are an AI threat intelligence analyst specializing in predictive security analysis.
 
@@ -551,13 +565,16 @@ Respond ONLY with this JSON:
 
     try:
         raw = _call_llm(prompt, max_tokens=1800)
-        result = json.loads(re.search(r"\{[\s\S]*\}", raw).group(0)) if re.search(r"\{[\s\S]*\}", raw) else json.loads(raw)
+        m = re.search(r"\{[\s\S]*\}", raw)
+        result = json.loads(m.group(0)) if m else json.loads(raw)
         result["mode"] = "ai"
         return result
     except Exception as e:
         logger.error(f"Predictive threat AI failed: {e}")
+        str_e = str(e)
+        err_trunc = "".join(ch for i, ch in enumerate(str_e) if i < 50)
         return {
-            "threat_trajectory": f"Prediction unavailable: {str(e)[:50]}",
+            "threat_trajectory": f"Prediction unavailable: {err_trunc}",
             "attack_stage": "unknown",
             "predictions": [],
             "blast_radius": {"affected_systems": [], "potential_data_loss": "unknown", "business_impact": "unknown"},
@@ -575,10 +592,12 @@ def correlate_logs_ai(logs_context: dict) -> dict:
     Finds connections between findings across multiple log sources, time windows,
     and user sessions that suggest coordinated attacks.
     """
+    logs_str = json.dumps(logs_context, indent=2)
+    logs_trunc = "".join(ch for i, ch in enumerate(logs_str) if i < 3000)
     prompt = f"""You are an AI security correlation analyst specializing in finding hidden connections in security events.
 
 MULTI-SOURCE LOG CONTEXT:
-{json.dumps(logs_context, indent=2)[:3000]}
+{logs_trunc}
 
 Perform deep correlation analysis:
 1. Find events that are CAUSALLY LINKED across time and sources
@@ -610,14 +629,17 @@ Respond ONLY with this JSON:
 
     try:
         raw = _call_llm(prompt, max_tokens=1800)
-        result = json.loads(re.search(r"\{[\s\S]*\}", raw).group(0)) if re.search(r"\{[\s\S]*\}", raw) else json.loads(raw)
+        m = re.search(r"\{[\s\S]*\}", raw)
+        result = json.loads(m.group(0)) if m else json.loads(raw)
         result["mode"] = "ai"
         return result
     except Exception as e:
         logger.error(f"AI correlation failed: {e}")
+        str_e = str(e)
+        err_trunc = "".join(ch for i, ch in enumerate(str_e) if i < 50)
         return {
             "correlations": [],
-            "attack_chain": f"Correlation unavailable: {str(e)[:50]}",
+            "attack_chain": f"Correlation unavailable: {err_trunc}",
             "threat_actor_profile": {
                 "sophistication": "unknown",
                 "objectives": [],

@@ -46,18 +46,22 @@ def analyze():
     Output: { findings, root_cause, predictions, fix_suggestions, anomalies, risk_score, confidence, summary, mode }
     """
     try:
-        data = request.get_json(force=True) or {}
+        raw_data = request.get_json(force=True) or {}
+        data = dict(raw_data) # typing pass
         content = data.get("content", "")
         if not content.strip():
             return jsonify({"error": "content is required"}), 400
 
         context = data.get("context", {})
+        if not isinstance(context, dict):
+            context = {}
+            
         # Merge legacy fields into context if provided
         for field in ["inputType", "riskLevel", "riskScore", "findings", "stats"]:
-            if field in data and data[field]:
-                context[field] = data[field]
+            if field in data and data.get(field):
+                context[field] = data.get(field)
 
-        session_id = data.get("session_id")
+        session_id = data.get("session_id", "default")
 
         logger.info(f"AI analyze: {len(content)} chars, session={session_id}, backend={os.getenv('LLM_BACKEND','gemini')}")
         result = analyze_with_ai(content, context, session_id)
@@ -78,7 +82,9 @@ def analyze_chunk():
     Output: { chunk_index, findings, chunk_risk_level, chunk_risk_score, escalation, anomalies, ai_commentary, new_patterns }
     """
     try:
-        data = request.get_json(force=True) or {}
+        raw_data = request.get_json(force=True) or {}
+        data = dict(raw_data)
+        
         chunk = data.get("chunk", "")
         chunk_index = data.get("chunk_index", 0)
         session_context = data.get("session_context", {})
@@ -96,7 +102,7 @@ def analyze_chunk():
                 "mode": "ai",
             })
 
-        session_id = data.get("session_id")
+        session_id = data.get("session_id", "default")
         
         # Legacy fallback if no session_id provided but session_context is
         if not session_id and not session_context:
@@ -121,16 +127,22 @@ def chat():
     Output: { reply, confidence, referenced_findings, follow_up_suggestions, mode }
     """
     try:
-        data = request.get_json(force=True) or {}
-        message = data.get("message", "").strip()
+        raw_data = request.get_json(force=True) or {}
+        data = dict(raw_data)
+        
+        message = data.get("message", "")
+        if isinstance(message, str):
+            message = message.strip()
+        
         if not message:
             return jsonify({"error": "message is required"}), 400
 
         history = data.get("history", [])
         context = data.get("context", {})
-        session_id = data.get("session_id")
+        session_id = data.get("session_id", "default")
 
-        logger.info(f"AI chat: '{message[:80]}...' session={session_id}")
+        msg_preview = "".join(ch for i, ch in enumerate(message) if i < 80)
+        logger.info(f"AI chat: '{msg_preview}...' session={session_id}")
         
         # We pass session_id to let the new memory engine handle history.
         # Fallback to provided history ONLY if no session_id is active.

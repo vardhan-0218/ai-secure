@@ -151,7 +151,7 @@ router.post('/', authMiddleware, analyzeLimiter, upload.single('file'), async (r
       }
 
       if (finalRiskLevel === 'critical' || finalRiskLevel === 'high') {
-        await createAlert(req.user.id, sessionId, 'risk_detected', finalRiskLevel,
+        await createAlert(req.user.id, unifiedSessionId, 'risk_detected', finalRiskLevel,
           `${finalRiskLevel.toUpperCase()} risk — ${enrichedFindings.length} finding(s). ${aiResult.summary?.substring(0, 200) || ''}`);
       }
 
@@ -165,7 +165,7 @@ router.post('/', authMiddleware, analyzeLimiter, upload.single('file'), async (r
 
     // 9. Build response
     res.json({
-      sessionId,
+      session_id: unifiedSessionId,
       // AI-primary fields
       summary: aiResult.summary,
       root_cause: aiResult.root_cause,

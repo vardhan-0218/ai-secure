@@ -76,7 +76,8 @@ def validate_and_normalize(result: dict) -> dict:
 
     # Enforce numeric ranges
     result["risk_score"] = int(_clamp(result.get("risk_score", 0), 0, 10, 0))
-    result["confidence"] = round(_clamp(result.get("confidence", 0.5), 0.0, 1.0, 0.5), 2)
+    clamped_conf = _clamp(result.get("confidence", 0.5), 0.0, 1.0, 0.5)
+    result["confidence"] = int(clamped_conf * 100) / 100.0
 
     # Normalise findings
     result["findings"] = normalize_findings(result.get("findings", []))
@@ -232,27 +233,29 @@ def validate_chunk_result(result: dict, chunk_index: int) -> dict:
     """Validate and normalize a chunk analysis result."""
     if not isinstance(result, dict):
         result = {}
+    
+    res = dict(result) # Explicit cast for Pyre inferece
 
     for key, default in CHUNK_SCHEMA.items():
-        if key not in result:
-            result[key] = default
+        if key not in res:
+            res[key] = default
 
-    result["chunk_index"] = chunk_index
-    result["chunk_risk_score"] = int(_clamp(result.get("chunk_risk_score", 0), 0, 10, 0))
+    res["chunk_index"] = chunk_index
+    res["chunk_risk_score"] = int(_clamp(res.get("chunk_risk_score", 0), 0, 10, 0))
 
-    risk_level = str(result.get("chunk_risk_level", "clean")).lower()
-    result["chunk_risk_level"] = risk_level if risk_level in VALID_CHUNK_RISK else "medium"
+    risk_level = str(res.get("chunk_risk_level", "clean")).lower()
+    res["chunk_risk_level"] = risk_level if risk_level in VALID_CHUNK_RISK else "medium"
 
-    result["findings"] = normalize_findings(result.get("findings", []))
+    res["findings"] = normalize_findings(res.get("findings", []))
 
-    esc = result.get("escalation", {})
+    esc = res.get("escalation", {})
     if not isinstance(esc, dict):
         esc = {}
     esc.setdefault("detected", False)
     esc.setdefault("explanation", "")
-    result["escalation"] = esc
+    res["escalation"] = esc
 
-    result["ai_commentary"] = str(result.get("ai_commentary", ""))
-    result["new_patterns"]  = result.get("new_patterns", []) if isinstance(result.get("new_patterns"), list) else []
+    res["ai_commentary"] = str(res.get("ai_commentary", ""))
+    res["new_patterns"]  = res.get("new_patterns", []) if isinstance(res.get("new_patterns"), list) else []
 
-    return result
+    return res

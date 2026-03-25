@@ -25,7 +25,7 @@ Public API:
 import time
 import logging
 import threading
-from typing import Optional
+from typing import Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ MAX_CHAT_HISTORY     = 20     # Cap chat turns per session
 
 # ── Storage ───────────────────────────────────────────────────────────────────
 
-_store: dict = {}               # session_id → SessionData
+_store: dict[str, Any] = {}     # session_id → SessionData
 _lock = threading.RLock()       # Thread-safe access
 
 
@@ -171,7 +171,7 @@ def clear_session(session_id: str) -> None:
     """Delete a session from memory."""
     with _lock:
         if session_id in _store:
-            del _store[session_id]
+            _store.pop(session_id, None)
             logger.info(f"Memory: cleared session '{session_id}'")
 
 
@@ -187,7 +187,7 @@ def cleanup_expired() -> int:
     with _lock:
         expired = [sid for sid, s in _store.items() if s["last_active"] < cutoff]
         for sid in expired:
-            del _store[sid]
+            _store.pop(sid, None)
     if expired:
         logger.info(f"Memory cleanup: purged {len(expired)} expired sessions")
     return len(expired)
