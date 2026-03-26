@@ -9,10 +9,10 @@ const { globalLimiter } = require('./src/middleware/rateLimiter');
 const logger = require('./src/utils/logger');
 const { sendError, sendSuccess } = require('./src/utils/response');
 const analyzeRouter = require('./src/routes/analyze');
-const authRouter   = require('./src/routes/auth');
-const chatRouter   = require('./src/routes/chat');
+const authRouter = require('./src/routes/auth');
+const chatRouter = require('./src/routes/chat');
 const alertsRouter = require('./src/routes/alerts');
-const adminRouter  = require('./src/routes/admin');
+const adminRouter = require('./src/routes/admin');
 const { initWebSocketServer } = require('./src/websocket/streamServer');
 
 const app = express();
@@ -21,10 +21,10 @@ const PORT = process.env.PORT || 3001;
 // Security
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({
-  origin: [process.env.FRONTEND_URL || 'http://localhost:5173', 'http://localhost:3000'],
+  origin: [process.env.FRONTEND_URL || 'https://ai-secure-h9gm.onrender.com', 'http://localhost:5173', 'http://localhost:3000'],
   credentials: true,
-  methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
 // Body parsing
@@ -50,11 +50,11 @@ app.get('/health', (req, res) => {
 });
 
 // Routes
-app.use('/auth',    authRouter);
+app.use('/auth', authRouter);
 app.use('/analyze', analyzeRouter);
-app.use('/chat',    chatRouter);
-app.use('/alerts',  alertsRouter);
-app.use('/admin',   adminRouter);
+app.use('/chat', chatRouter);
+app.use('/alerts', alertsRouter);
+app.use('/admin', adminRouter);
 
 // 404
 app.use((req, res) => sendError(res, 404, 'Route not found'));
