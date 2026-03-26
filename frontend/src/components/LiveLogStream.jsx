@@ -41,7 +41,9 @@ export default function LiveLogStream({ pushToast, incrementAlert, setResult, fe
     const auth  = localStorage.getItem('auth')
     const token = auth ? JSON.parse(auth).accessToken : ''
     try {
-      const ws = new WebSocket(`ws://localhost:3001/stream?token=${token}`)
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+      const WS_URL = import.meta.env.VITE_WS_URL || `${protocol}://${window.location.host}`
+      const ws = new WebSocket(`${WS_URL}/stream?token=${token}`)
       wsRef.current = ws
 
       ws.onopen  = () => { setConnected(true); setConnError('') }
