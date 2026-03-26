@@ -238,7 +238,7 @@ def delete_memory(session_id):
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("AI_SERVICE_PORT", 5001))
-    logger.info(f"🐍 AI Service v3.0 (AI-First) starting on http://localhost:{port}")
+    port = int(os.getenv("PORT", os.getenv("AI_SERVICE_PORT", 5001)))
+    logger.info(f"🐍 AI Service v3.0 (AI-First) starting on port {port}")
     logger.info(f"🤖 LLM Backend: {os.getenv('LLM_BACKEND', 'gemini')}")
     app.run(host="0.0.0.0", port=port, debug=os.getenv("FLASK_DEBUG", "false").lower() == "true")
